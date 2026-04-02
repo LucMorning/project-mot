@@ -2,7 +2,7 @@ import sqlite3
 import json
 from pathlib import Path
 from src.config import DB_PATH, FICHAS_DIR
-from src.utils.matching import normalize_name
+from src.utils.name_matcher import normalize_name
 
 def build_markdown_fichas():
     FICHAS_DIR.mkdir(parents=True, exist_ok=True)

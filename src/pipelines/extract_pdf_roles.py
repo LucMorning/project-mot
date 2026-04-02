@@ -1,61 +1,72 @@
-import sqlite3
+"""
+Extract PDF Roles Pipeline
+
+Extrai informações de cargos de arquivos PDF e insere no banco.
+
+Refatorado para usar:
+- src.utils.pdf_reader → leitura multi-backend de PDFs
+- src.utils.text_parser → limpeza de texto centralizada
+- src.database.repositories → Repository pattern (DRY)
+"""
 import re
 from pathlib import Path
-from src.config import DB_PATH, CARGOS_DIR
-from src.utils.file_readers import read_pdf_plumber
 
-def clean_text(text):
-    if not text: return ""
-    import unidecode
-    # Normalização segura de caracteres PDF quebraveis
-    t = text.encode('utf-8', 'ignore').decode('utf-8')
-    t = unidecode.unidecode(t)
-    return t
+from src.config import CARGOS_DIR, DB_PATH
+from src.utils.pdf_reader import read_pdf
+from src.utils.text_parser import clean_pdf_text, clean_section
+from src.database.repositories import CargosRepository
 
-def parse_cargo_content(raw_text):
+
+def parse_cargo_sections(raw_text: str) -> dict:
     """
-    Aplica as RegEx homologadas para extrair seções vitais do PDF do cargo.
+    Aplica RegEx homologadas para extrair seções vitais do PDF do cargo.
+
+    Args:
+        raw_text: Texto bruto extraído do PDF
+
+    Returns:
+        Dict com {area, desafios, responsabilidades, competencias}
     """
-    text = clean_text(raw_text)
-    
-    # 1. Área de Atuação (Metadados FIXOS do RH)
+    # Limpa texto do PDF primeiro
+    text = clean_pdf_text(raw_text)
+
+    # 1. Área de Atuação (metadados do RH)
     area_atuacao = ""
-    plat_match = re.search(r'Plataforma:\s*([^\n]+)', text, re.IGNORECASE)
-    dir_match  = re.search(r'Diretoria:\s*([^\n]+)', text, re.IGNORECASE)
-    area_match = re.search(r'Área:\s*([^\n]+)' if 'Área:' in text else r'Area:\s*([^\n]+)', text, re.IGNORECASE)
-    
-    if plat_match: area_atuacao += f"{plat_match.group(1).strip()} | "
-    if dir_match:  area_atuacao += f"{dir_match.group(1).strip()} | "
-    if area_match: area_atuacao += f"{area_match.group(1).strip()}"
-    
+    for pattern, label in [
+        (r'Plataforma:\s*([^\n]+)', 'Plataforma'),
+        (r'Diretoria:\s*([^\n]+)', 'Diretoria'),
+        (r'Área:\s*([^\n]+)', 'Área')
+    ]:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            area_atuacao += f"{label}: {match.group(1).strip()} | "
+
     # 2. Desafios do Cargo
     desafios = ""
-    desafio_match = re.search(r'(?:3\.\s*)?DESAFIOS DO CARGO(.*?)(?:\n4\.\s*DIMENS[ÕO]ES|\n4\.\s|\n5\.\s|$)', text, re.IGNORECASE | re.DOTALL)
+    desafio_match = re.search(
+        r'(?:3\.\s*)?DESAFIOS DO CARGO(.*?)(?:\n4\.\s*DIMENS[ÕO]ES|\n4\.\s|\n5\.\s|$)',
+        text, re.IGNORECASE | re.DOTALL
+    )
     if desafio_match:
         desafios = re.sub(r'\s+', ' ', desafio_match.group(1)).strip()
-        
-    # 3. Responsabilidades Principais (Filtra lixos de compliance e numeração PDFPlumber)
+
+    # 3. Responsabilidades Principais
     responsabilidades = ""
-    resp_match = re.search(r'(?:6\.\s*)?RESPONSABILIDADES PRINCIPAIS(.*?)(?:\n7\.\s*REQUISITOS|\n7\.\s|\n8\.\s|$)', text, re.IGNORECASE | re.DOTALL)
+    resp_match = re.search(
+        r'(?:6\.\s*)?RESPONSABILIDADES PRINCIPAIS(.*?)(?:\n7\.\s*REQUISITOS|\n7\.\s|\n8\.\s|$)',
+        text, re.IGNORECASE | re.DOTALL
+    )
     if resp_match:
-        content = resp_match.group(1).strip()
-        # Remove cláusulas padrão de compliance / ISO / Normas
-        content = re.sub(r'\d+\.\s*Este colaborador tamb[ée]m.*', '', content, flags=re.IGNORECASE | re.DOTALL)
-        content = re.sub(r'Este colaborador tamb[ée]m.*', '', content, flags=re.IGNORECASE | re.DOTALL)
-        content = re.sub(r'Cumprir e fazer cumprir normas.*', '', content, flags=re.IGNORECASE | re.DOTALL)
-        
-        # Limpa linhas vazias e números de bullets zoados
-        linhas = [l for l in content.split('\n') if not re.match(r'^\d+\.\s*-\s*$', l.strip())]
-        content = " ".join(linhas)
-        content = re.sub(r'\b\d+\.\s+', ' ', content) # Remove numeração "1. ", "2. "
-        responsabilidades = re.sub(r'\s+', ' ', content).strip()
-        
+        responsabilidades = clean_section(resp_match.group(1), remove_compliance=True)
+
     # 4. Competências e Requisitos
     competencias = ""
-    comp_match = re.search(r'(?:7\.\s*)?REQUISITOS M[ÍI]NIMOS DO CARGO(.*?)(?:\n8\.\s*REVIS[ÃA]O|$)', text, re.IGNORECASE | re.DOTALL)
+    comp_match = re.search(
+        r'(?:7\.\s*)?REQUISITOS M[ÍI]NIMOS DO CARGO(.*?)(?:\n8\.\s*REVIS[ÃA]O|$)',
+        text, re.IGNORECASE | re.DOTALL
+    )
     if comp_match:
         content = comp_match.group(1).strip()
-        # Junta tudo, removendo quebras pois o PDF é tabular/colunado
         content = re.sub(r'\b\d+\.\s+', ' ', content)
         competencias = re.sub(r'\s+', ' ', content).strip()
 
@@ -66,48 +77,50 @@ def parse_cargo_content(raw_text):
         "competencias": competencias[:1200]
     }
 
+
 def ingest_cargos():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
+    """
+    Extrai informações de cargos de PDFs e insere no banco.
+
+    Processo:
+    1. Lista todos os PDFs na pasta de cargos
+    2. Para cada PDF:
+       - Extrai texto (pdfplumber → pymupdf → OCR)
+       - Parseia seções (responsabilidades, competencias, etc)
+       - Salva no banco
+    """
+    repo = CargosRepository(DB_PATH)
     cargo_files = list(CARGOS_DIR.rglob("*.pdf"))
-    
-    # Modo Idempotente
-    cursor.execute("DELETE FROM cargos")
-    
+
+    # Write truncate
+    repo.delete_all()
+
     count = 0
     for pdf_path in cargo_files:
         filename = pdf_path.name
         titulo_cargo = filename.replace(".pdf", "")
-        
-        # 1. Extração bruta
-        texto_limpo = read_pdf_plumber(str(pdf_path))
-        
-        # 2. Parsing das seções
-        parsed = parse_cargo_content(texto_limpo)
-        
-        # 3. Inserção c/ colunas novas
-        cursor.execute("""
-            INSERT INTO cargos (
-                titulo_cargo, arquivo_pdf, texto_extraido, 
-                responsabilidades, competencias, area_atuacao, desafios
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            titulo_cargo, 
-            filename, 
-            texto_limpo, 
-            parsed["responsabilidades"],
-            parsed["competencias"],
-            parsed["area"],
-            parsed["desafios"]
-        ))
+
+        # 1. Extrai texto do PDF (multi-backend + OCR)
+        result = read_pdf(pdf_path)
+        texto_extraido = result.text
+
+        # 2. Parseia seções
+        parsed = parse_cargo_sections(texto_extraido)
+
+        # 3. Salva no banco
+        repo.insert({
+            'titulo_cargo': titulo_cargo,
+            'arquivo_pdf': filename,
+            'texto_extraido': texto_extraido,
+            'responsabilidades': parsed['responsabilidades'],
+            'competencias': parsed['competencias'],
+            'area_atuacao': parsed['area'],
+            'desafios': parsed['desafios']
+        })
         count += 1
-        
-    conn.commit()
-    conn.close()
-    
-    print(f"[SUCESSO] Ingeridos e Normalizados {count} PDFs de Cargo no DB.")
+
+    print(f"[SUCCESS] Ingested {count} PDF roles with structured sections.")
+
 
 if __name__ == "__main__":
     ingest_cargos()

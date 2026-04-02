@@ -1,48 +1,83 @@
-import sqlite3
-import os
-from pathlib import Path
-from src.config import DB_PATH, TRANSCRICOES_DIR
-from src.utils.file_readers import extract_text_from_docx
+"""
+Extract DOCX Transcripts Pipeline
 
-def get_db_connection():
-    return sqlite3.connect(DB_PATH)
+Extrai transcrições de arquivos .docx e insere no banco.
+
+Refatorado para usar:
+- src.utils.date_parser → parse de datas
+- src.utils.text_parser → limpeza de texto
+- src.database.repositories → Repository pattern (DRY)
+"""
+from pathlib import Path
+
+from src.config import TRANSCRICOES_DIR
+from src.utils.docx_reader import extract_text_from_docx
+from src.utils.date_parser import parse_date
+from src.utils.text_parser import clean_transcript
+from src.database.repositories import TranscricoesRepository, EntrevistadosRepository
+from src.config import DB_PATH
+
 
 def ingest_transcripts():
-    conn = get_db_connection()
+    """
+    Extrai transcrições de arquivos .docx e insere no banco.
+
+    Processo:
+    1. Busca entrevistados com arquivo_transcricao
+    2. Para cada arquivo:
+       - Extrai texto do DOCX
+       - Parseia data/hora
+       - Limpa ruído da transcrição
+       - Salva no banco
+    """
+    # Repositories
+    transcript_repo = TranscricoesRepository(DB_PATH)
+    entrevistado_repo = EntrevistadosRepository(DB_PATH)
+
+    # Busca entrevistados com transcrições
+    conn = EntrevistadosRepository(DB_PATH)._get_conn()
     cursor = conn.cursor()
-    
-    # Busca quem tem um arquivo linkado
-    cursor.execute("SELECT id, arquivo_transcricao FROM entrevistados WHERE arquivo_transcricao IS NOT NULL")
-    linhas = cursor.fetchall()
-    
-    count = 0
-    # Limpa dados se rodar de novo
-    cursor.execute("DELETE FROM transcricoes")
-    
-    for row in linhas:
-        entrevistado_id, file_name = row
-        file_path = TRANSCRICOES_DIR / file_name
-        
-        if file_path.exists():
-            text = extract_text_from_docx(file_path)
-            
-            # Conta paragraphs básicos e length
-            num_chars = len(text)
-            num_paras = len([p for p in text.split("\n") if len(p.strip()) > 5])
-            
-            cursor.execute("""
-                INSERT INTO transcricoes (entrevistado_id, texto_completo, num_paragrafos, num_caracteres)
-                VALUES (?, ?, ?, ?)
-            """, (entrevistado_id, text, num_paras, num_chars))
-            count += 1
-            
-            # Atualiza o status
-            cursor.execute("UPDATE entrevistados SET status_revisao = 'em_progresso' WHERE id = ?", (entrevistado_id,))
-            
-    conn.commit()
+    cursor.execute(
+        "SELECT id, arquivo_transcricao FROM entrevistados WHERE arquivo_transcricao IS NOT NULL"
+    )
+    rows = cursor.fetchall()
     conn.close()
-    
-    print(f"[SUCESSO] Feita a ingestão do texto completo de {count} transcrições no SQLite.")
+
+    # Write truncate: limpa transcrições antes de reingetar
+    transcript_repo.delete_all()
+
+    count = 0
+    for entrevistado_id, file_name in rows:
+        file_path = TRANSCRICOES_DIR / file_name
+
+        if not file_path.exists():
+            print(f"[AVISO] Arquivo não encontrado: {file_path}")
+            continue
+
+        # 1. Extrai texto do DOCX
+        text_raw = extract_text_from_docx(file_path)
+
+        # 2. Parseia data/hora e limpa texto (utils reutilizáveis)
+        text_with_date, timestamp = parse_date(text_raw)
+        text_clean = clean_transcript(text_with_date)
+
+        # 3. Salva no banco (Repository pattern - DRY)
+        transcript_repo.insert({
+            'id_entrevistado': entrevistado_id,
+            'texto_completo': text_raw,
+            'texto_limpo': text_clean,
+            'data_gravacao': timestamp,
+            'arquivo_fonte': file_name,
+            'num_paragrafos': 0,
+            'num_caracteres': len(text_clean)
+        })
+
+        # 4. Atualiza status
+        entrevistado_repo.update_status(entrevistado_id, 'em_progresso')
+        count += 1
+
+    print(f"[SUCCESS] Ingested {count} transcripts with file tracking.")
+
 
 if __name__ == "__main__":
     ingest_transcripts()

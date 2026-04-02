@@ -1,123 +1,116 @@
 import sqlite3
-from pathlib import Path
+import os
 
-def init_db(db_path: Path):
+def create_database(db_path):
     """
-    Inicializa as tabelas no banco de dados SQLite para o MOTIVA.
-    Se o banco já existir, as tabelas só serão criadas se não existirem (IF NOT EXISTS).
+    Cria a estrutura de tabelas do banco de dados MOTIVA com nomes claros e objetivos.
     """
-    db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    # Tabela 1: Entrevistados (inclui tracking)
-    cursor.execute("""
+    # 1. Tabela de Atores (Entrevistados)
+    cursor.execute('''
     CREATE TABLE IF NOT EXISTS entrevistados (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         nome TEXT NOT NULL,
         cargo TEXT,
         diretoria TEXT,
-        plataforma TEXT,
         area TEXT,
         nivel TEXT,
-        data_entrevista TEXT,
-        tipo_entrevista TEXT,
-        arquivo_transcricao TEXT,
-        arquivo_cargo_pdf TEXT,
-        
-        -- Tracking fields para a IA / Workflow
-        status_revisao TEXT DEFAULT 'pendente', -- 'pendente', 'em_progresso', 'concluida', 'erro'
-        notas_revisor TEXT,
-        data_revisao TEXT,
-        tipo_analise_concluida TEXT
-    );
-    """)
+        texto_cargo TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
 
-    # Tabela 2: Transcrições originais (Raw text)
-    cursor.execute("""
+    # 2. Tabela de Transcrições
+    cursor.execute('''
     CREATE TABLE IF NOT EXISTS transcricoes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entrevistado_id INTEGER REFERENCES entrevistados(id),
-        texto_completo TEXT,
-        num_paragrafos INTEGER,
-        num_caracteres INTEGER
-    );
-    """)
+        id_entrevistado INTEGER,
+        texto_limpo TEXT,
+        data_gravacao TEXT,
+        tempo TEXT,
+        arquivo_origem TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (id_entrevistado) REFERENCES entrevistados (id)
+    )
+    ''')
 
-    # Tabela 3: Cargos mapeados (PDF extrator)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS cargos (
+    # 3. Tabela de Blocos
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS transcricao_chunks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        titulo_cargo TEXT,
-        arquivo_pdf TEXT,
-        texto_extraido TEXT,
-        responsabilidades TEXT,
-        competencias TEXT,
-        area_atuacao TEXT,
-        desafios TEXT
-    );
-    """)
+        id_transcricao INTEGER,
+        ordem INTEGER,
+        conteudo TEXT,
+        checksum TEXT,
+        status_analise TEXT DEFAULT 'pendente',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (id_transcricao) REFERENCES transcricoes (id)
+    )
+    ''')
 
-    # Tabela 4: Insights IA
-    cursor.execute("""
+    # 4. Tabela de Insights IA (O Coração do Diagnóstico)
+    cursor.execute('''
     CREATE TABLE IF NOT EXISTS insights_ia (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entrevistado_id INTEGER REFERENCES entrevistados(id),
-        etapa_cadeia_valor TEXT,
-        categoria TEXT,         -- 'Sistema', 'Dor', 'Processo', 'ETL Humano', 'Insight Entrelinhas'
+        id_entrevistado INTEGER,
+        id_bloco INTEGER,
+        etapa_cadeia TEXT,
+        categoria TEXT,
         subcategoria TEXT,
-        descricao TEXT,         -- Texto gerado pela IA
-        citacao_direta TEXT,    -- Citação do texto original extraída pela IA
-        sistemas_envolvidos TEXT, -- JSON array
-        severidade TEXT,        -- 'Alta', 'Media', 'Baixa'
+        descricao TEXT,
+        citacao_direta TEXT,
+        sistemas_envolvidos TEXT,
+        severidade TEXT,
         confianca REAL,
         modelo_ia TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (id_entrevistado) REFERENCES entrevistados (id),
+        FOREIGN KEY (id_bloco) REFERENCES transcricao_chunks (id)
+    )
+    ''')
 
-    # Tabela 5: Relações Hierárquicas e Funcionais
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS relacoes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entrevistado_id INTEGER REFERENCES entrevistados(id),
-        tipo TEXT,              -- 'responde_a', 'se_relaciona_com', 'depende_de'
-        pessoa_ou_area TEXT,
-        contexto TEXT
-    );
-    """)
-
-    # Tabela 6:Sistemas e Uso
-    cursor.execute("""
+    # 5. Tabela de Sistemas Uso (Workarounds e Ferramentas)
+    cursor.execute('''
     CREATE TABLE IF NOT EXISTS sistemas_uso (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entrevistado_id INTEGER REFERENCES entrevistados(id),
+        id_entrevistado INTEGER,
+        id_bloco INTEGER,
         sistema TEXT,
         como_usa TEXT,
         etapa_cadeia TEXT,
-        satisfacao TEXT,        -- 'Positivo', 'Neutro', 'Negativo'
-        workaround TEXT         -- O que ele faz pra contornar (Planilha, Copy/Paste)
-    );
-    """)
+        satisfacao TEXT,
+        workaround TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (id_entrevistado) REFERENCES entrevistados (id),
+        FOREIGN KEY (id_bloco) REFERENCES transcricao_chunks (id)
+    )
+    ''')
 
-    # Tabela 7: Validação Cruzada (Etapa 3 do Pipeline)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS cross_validation (
+    # 6. Tabela de Relações
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS relacoes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entrevistado_id INTEGER REFERENCES entrevistados(id),
-        padroes_confirmados TEXT,      -- JSON array de strings
-        contradicoes TEXT,             -- JSON array de strings
-        novos_insights TEXT,           -- JSON array de strings
-        severidade_ajustada TEXT,      -- 'Alta', 'Media', 'Baixa' - ajuste baseado no contexto
-        num_referencias INTEGER,       -- Quantas entrevistas anteriores foram usadas como contexto
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
+        id_entrevistado INTEGER,
+        id_bloco INTEGER,
+        tipo TEXT,
+        pessoa_ou_area TEXT,
+        contexto TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (id_entrevistado) REFERENCES entrevistados (id),
+        FOREIGN KEY (id_bloco) REFERENCES transcricao_chunks (id)
+    )
+    ''')
+
+    # 7/8. Outras Tabelas Auxiliares
+    cursor.execute('''CREATE TABLE IF NOT EXISTS sistemas_ti (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE, etapa_processo TEXT, area_responsavel TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS processos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE, area_responsavel TEXT, unidade_negocio TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
 
     conn.commit()
     conn.close()
+    print(f"Banco de Dados [Schema Perfeito] inicializado em: {db_path}")
 
 if __name__ == "__main__":
     from src.config import DB_PATH
-    init_db(DB_PATH)
-    print(f"Banco de dados inicializado em: {DB_PATH}")
+    create_database(DB_PATH)

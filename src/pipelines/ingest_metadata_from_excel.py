@@ -3,7 +3,7 @@ import openpyxl
 from pathlib import Path
 
 from src.config import DB_PATH, LISTA_ENTREVISTAS
-from src.utils.matching import build_name_file_map
+from src.utils.name_matcher import build_name_file_map
 
 def ingest_master_spreadsheet():
     """Lê a planilha lista_entrevistas.xlsx e insere no banco, fazendo o link com os arquivos .docx."""
@@ -50,7 +50,7 @@ def ingest_master_spreadsheet():
         # Pega a lista de arquivos disponiveis no novo diretorio
         from src.config import TRANSCRICOES_DIR
         import os
-        from src.utils.matching import get_best_match
+        from src.utils.name_matcher import get_best_match
         
         available = os.listdir(TRANSCRICOES_DIR) if TRANSCRICOES_DIR.exists() else []
         arquivo_docx = get_best_match(nome, available)
