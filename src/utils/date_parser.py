@@ -38,9 +38,9 @@ class DateParser:
 
     def __init__(self):
         # Padrões regex (compilados uma vez)
-        self._iso_pattern = re.compile(r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2}:\d{2})')
-        self._teams_pattern = re.compile(r'(\d{1,2})\s+de\s+([a-zçãíA-Z]+)\s+de\s+(\d{4}),\s+(\d{1,2}:\d{2})(AM|PM)?')
-        self._compact_pattern = re.compile(r'(\d{4})(\d{2})(\d{2})(?:_(\d{2})(\d{2})(\d{2}))?')
+        self._iso_pattern = re.compile(r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2}:\d{2})', re.IGNORECASE)
+        self._teams_pattern = re.compile(r'(\d{1,2})\s+de\s+([a-zçãíA-Z]+)\s+de\s+(\d{4}),\s+(\d{1,2}:\d{2})(AM|PM)?', re.IGNORECASE)
+        self._compact_pattern = re.compile(r'(\d{4})(\d{2})(\d{2})(?:_(\d{2})(\d{2})(\d{2}))?', re.IGNORECASE)
 
     def parse(self, text: str) -> Tuple[str, str]:
         """
@@ -83,7 +83,7 @@ class DateParser:
 
                 data_final = f"{ano}-{mes_num}-{dia.zfill(2)}"
                 hora_final = f"{h:02d}:{m:02d}:00"
-                text_clean = self._teams_pattern.sub(' ', text, flags=re.IGNORECASE)
+                text_clean = self._teams_pattern.sub(' ', text)
 
         # 3. Tenta formato compacto: 20250115_143000
         elif data_final == "0000-00-00":

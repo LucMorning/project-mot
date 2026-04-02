@@ -66,10 +66,8 @@ def ingest_transcripts():
             'id_entrevistado': entrevistado_id,
             'texto_completo': text_raw,
             'texto_limpo': text_clean,
-            'data_gravacao': timestamp,
-            'arquivo_fonte': file_name,
-            'num_paragrafos': 0,
-            'num_caracteres': len(text_clean)
+            'dt_gravacao': timestamp,
+            'arquivo_origem': file_name
         })
 
         # 4. Atualiza status

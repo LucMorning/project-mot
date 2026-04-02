@@ -37,13 +37,13 @@ def ingest_master_spreadsheet():
         plataforma = ws.cell(row=row, column=5).value
         area = ws.cell(row=row, column=6).value
         nivel = ws.cell(row=row, column=7).value
-        data_entrevista = ws.cell(row=row, column=8).value
+        dt_entrevista = ws.cell(row=row, column=8).value
         
         # Pode ser datetime, formata para string
-        if hasattr(data_entrevista, "strftime"):
-            data_entrevista = data_entrevista.strftime("%Y-%m-%d %H:%M")
-        elif data_entrevista:
-            data_entrevista = str(data_entrevista)
+        if hasattr(dt_entrevista, "strftime"):
+            dt_entrevista = dt_entrevista.strftime("%Y-%m-%d %H:%M")
+        elif dt_entrevista:
+            dt_entrevista = str(dt_entrevista)
             
         tipo_entrevista = ws.cell(row=row, column=9).value
         
@@ -57,9 +57,9 @@ def ingest_master_spreadsheet():
         
         cursor.execute("""
             INSERT INTO entrevistados 
-            (nome, cargo, diretoria, plataforma, area, nivel, data_entrevista, tipo_entrevista, arquivo_transcricao)
+            (nome, cargo, diretoria, plataforma, area, nivel, dt_entrevista, tipo_entrevista, arquivo_transcricao)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (nome, cargo, diretoria, plataforma, area, nivel, data_entrevista, tipo_entrevista, arquivo_docx))
+        """, (nome, cargo, diretoria, plataforma, area, nivel, dt_entrevista, tipo_entrevista, arquivo_docx))
         
         count_inserted += 1
 

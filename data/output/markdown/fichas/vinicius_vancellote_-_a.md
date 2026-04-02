@@ -1,21 +1,20 @@
-# Ficha: Vinicius Vancellote - A
+# Ficha de Diagnóstico As-Is: Vinicius Vancellote - A
 
 ## 👤 Perfil Organizacional
 - **Cargo**: Especialista de PMO
 - **Área**: PMO - Demais Empreendimentos
 - **Diretoria**: VP Trilhos
 - **Nível**: N/A
-- **Status de Revisão IA**: `PENDENTE`
 
-> ⚠️ **Atenção:** Esta entrevista ainda não foi processada pela Inteligência Artificial. Os insights detalhados não estão disponíveis.
+> ⚠️ **Atenção:** Esta entrevista ainda não possui insights processados pela IA.
 
-## 🖥️ Ecossistema e Sistemas (As-Is)
-*Nenhum sistema registrado.*
+## 🖥️ Ecossistema de Sistemas e Workarounds
+*Nenhum sistema registrado para este entrevistado.*
 
-## 🔥 Dores, Gargalos e Insights Principais
-*Nenhum insight capturado.*
-## 🤝 Mapa de Relações (Stakeholders)
-*Nenhuma relação mapeada.*
+## 🔥 Dores, Gargalos e Diagnósticos
+*Nenhum ponto de dor capturado até o momento.*
+## 🤝 Mapa de Relações e Stakeholders
+*Nenhuma relação mapeada para este entrevistado.*
 
 ---
-*Ficha gerada automaticamente pelo Pipeline Analyzer da MOTIVA/Veron.*
+*Relatório gerado pelo Pipeline Sênior MOTIVA | Veron Consultoria.*

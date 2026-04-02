@@ -17,7 +17,6 @@ def map_sistemas_ti_to_db():
             nome TEXT NOT NULL,
             etapa_processo TEXT,
             area_responsavel TEXT,
-            observacoes TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -36,47 +35,47 @@ def map_sistemas_ti_to_db():
     # Dados do Slide 2 - Visão Macro de Sistemas (25 sistemas em 7 etapas)
     sistemas_data = [
         # Etapa 1: Estruturação PEP e EAP
-        ('Prisma', 'Estruturação PEP e EAP', None, None),
-        ('Fli/CO', 'Estruturação PEP e EAP', None, None),
-        ('SAP PS', 'Estruturação PEP e EAP', None, None),
-        ('Compor 90', 'Estruturação PEP e EAP', None, None),
-        ('Excel', 'Estruturação PEP e EAP', None, None),
-        ('Project', 'Estruturação PEP e EAP', None, None),
+        ('Prisma', 'Estruturação PEP e EAP', None),
+        ('Fli/CO', 'Estruturação PEP e EAP', None),
+        ('SAP PS', 'Estruturação PEP e EAP', None),
+        ('Compor 90', 'Estruturação PEP e EAP', None),
+        ('Excel', 'Estruturação PEP e EAP', None),
+        ('Project', 'Estruturação PEP e EAP', None),
 
         # Etapa 2: Contratação
-        ('DocuSign', 'Contratação', None, None),
-        ('Coupia', 'Contratação', None, None),
-        ('SAP', 'Contratação', None, None),
-        ('Teams', 'Contratação', None, None),
-        ('Netflex', 'Contratação', None, None),
-        ('Flexchain', 'Contratação', None, None),
+        ('DocuSign', 'Contratação', None),
+        ('Coupia', 'Contratação', None),
+        ('SAP', 'Contratação', None),
+        ('Teams', 'Contratação', None),
+        ('Netflex', 'Contratação', None),
+        ('Flexchain', 'Contratação', None),
 
         # Etapa 3: Planejamento e Execução
-        ('PM', 'Planejamento e Execução', None, None),
-        ('Kartado', 'Planejamento e Execução', None, None),
-        ('Power Apps', 'Planejamento e Execução', None, None),
-        ('SharePoint', 'Planejamento e Execução', None, None),
-        ('Conecta', 'Planejamento e Execução', None, None),
+        ('PM', 'Planejamento e Execução', None),
+        ('Kartado', 'Planejamento e Execução', None),
+        ('Power Apps', 'Planejamento e Execução', None),
+        ('SharePoint', 'Planejamento e Execução', None),
+        ('Conecta', 'Planejamento e Execução', None),
 
         # Etapa 4: Medição
-        ('Fulcrum', 'Medição', None, None),
-        ('SAP PS/FI', 'Medição', None, None),
+        ('Fulcrum', 'Medição', None),
+        ('SAP PS/FI', 'Medição', None),
 
         # Etapa 5: Tendência
-        ('Archer', 'Tendência', None, None),
-        ('SAP BW/BPC', 'Tendência', None, None),
-        ('BI', 'Tendência', None, None),
-        ('Teams Idea', 'Tendência', None, None),
+        ('Archer', 'Tendência', None),
+        ('SAP BW/BPC', 'Tendência', None),
+        ('BI', 'Tendência', None),
+        ('Teams Idea', 'Tendência', None),
 
         # Etapa 6: Fiscal e NF
-        ('Atlas', 'Fiscal e NF', None, None),
-        ('V360', 'Fiscal e NF', None, None),
-        ('SAP FI', 'Fiscal e NF', None, None),
-        ('Forms', 'Fiscal e NF', None, None),
+        ('Atlas', 'Fiscal e NF', None),
+        ('V360', 'Fiscal e NF', None),
+        ('SAP FI', 'Fiscal e NF', None),
+        ('Forms', 'Fiscal e NF', None),
 
         # Etapa 7: Pagamento
-        ('Painel de Chamados', 'Pagamento', None, None),
-        ('SAP FI/AP', 'Pagamento', None, None),
+        ('Painel de Chamados', 'Pagamento', None),
+        ('SAP FI/AP', 'Pagamento', None),
     ]
 
     # Dados dos Slides 3, 4, 5 - Processos por Área
@@ -182,8 +181,8 @@ def map_sistemas_ti_to_db():
     # Inserir sistemas
     for sistema in sistemas_data:
         cursor.execute('''
-            INSERT OR REPLACE INTO sistemas_ti (nome, etapa_processo, area_responsavel, observacoes)
-            VALUES (?, ?, ?, ?)
+            INSERT OR REPLACE INTO sistemas_ti (nome, etapa_processo, area_responsavel)
+            VALUES (?, ?, ?)
         ''', sistema)
 
     # Inserir processos

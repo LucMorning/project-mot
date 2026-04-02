@@ -18,7 +18,7 @@ import warnings
 import dotenv
 
 from src.config import DB_PATH
-from src.pipelines.agents import get_all_agents
+from src.agents import get_all_agents
 from src.database.repositories import (
     InsightsRepository, SistemasUsoRepository, RelacoesRepository
 )
@@ -28,7 +28,7 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 # Configurações de escala blindada
 BATCH_SIZE = 5
 BATCH_SLEEP = 30
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-2.5-flash"
 ERROR_THRESHOLD = 3
 
 # Contador de erros consecutivos
@@ -69,6 +69,41 @@ class GeminiProvider:
 
 
 # ─────────────────────────────────────────────────────────────
+# AGENT ORCHESTRATOR - Filtro Inteligente
+# ─────────────────────────────────────────────────────────────
+
+class AgentOrchestrator:
+    """
+    Decide quais agents executar para cada chunk baseado em keywords.
+
+    Economiza chamadas à API pulando agents irrelevantes.
+    """
+
+    def analyze_chunk(self, chunk_text: str) -> List[str]:
+        """
+        Retorna quais agents executar para este chunk.
+
+        Args:
+            chunk_text: Texto do chunk a analisar
+
+        Returns:
+            Lista de nomes de agents a executar (ex: ['dores', 'sistemas'])
+        """
+        chunk_lower = chunk_text.lower()
+
+        # Busca keywords de cada agent
+        needed = []
+
+        for agent in get_all_agents():
+            keywords = agent.get_keywords()
+            if any(kw in chunk_lower for kw in keywords):
+                needed.append(agent.get_name())
+
+        # Sempre executa pelo menos 1 (dores como fallback)
+        return needed if needed else ['dores']
+
+
+# ─────────────────────────────────────────────────────────────
 # GLOSSARY BUILDER
 # ─────────────────────────────────────────────────────────────
 
@@ -102,23 +137,35 @@ async def process_one_chunk(
     content: str,
     metadata: Dict,
     glossary: str,
-    ai: GeminiProvider
+    ai: GeminiProvider,
+    orchestrator: AgentOrchestrator = None
 ) -> bool:
     """
-    Processa um único chunk com os 4 agentes.
+    Processa um único chunk com os agentes selecionados pelo Orchestrator.
+
+    Args:
+        orchestrator: Se fornecido, filtra quais agents executar. Se None, executa todos.
 
     Returns:
         True se processou com sucesso, False caso contrário
     """
     global consecutive_errors
 
-    agents = get_all_agents()
+    # Orchestrator decide quais agents executar
+    if orchestrator:
+        agents_to_run = orchestrator.analyze_chunk(content)
+        agents_list = [a for a in get_all_agents() if a.get_name() in agents_to_run]
+        print(f"      [ORCHESTRATOR] Agents: {agents_to_run} ({len(agents_list)}/{len(get_all_agents())})")
+    else:
+        agents_list = get_all_agents()
+
     contexto = f"CONTEXTO MESTRE:\n{glossary}\n\nENTREVISTADO: {metadata['nome']} ({metadata['cargo']})\nFALA:\n{content}"
 
-    results = []
-    has_data = False
+    # Mapeia results por agent name
+    results_map = {}
 
-    for agent in agents:
+    for agent in agents_list:
+        agent_name = agent.get_name()
         try:
             res = await asyncio.to_thread(
                 ai.analyze,
@@ -126,20 +173,22 @@ async def process_one_chunk(
                 contexto,
                 agent.get_schema()
             )
-            if res and any(res.get(k) for k in res.keys()):
-                results.append(res)
-                has_data = True
-            else:
-                results.append({})
+            results_map[agent_name] = res
             await asyncio.sleep(2)  # Rate limiting entre agentes
         except Exception as e:
-            print(f"      [ERRO AGENTE {agent.get_name()}]: {e}")
-            results.append({})
+            print(f"      [ERRO AGENTE {agent_name}]: {e}")
+            results_map[agent_name] = {}
             if "429" in str(e):  # Rate limit
                 consecutive_errors += 1
 
-    if has_data and len(results) == 4:
-        save_successful_results(entrevistado_id, chunk_id, results)
+    # Converte para lista ordenado (dores, sistemas, relacoes, processos)
+    ordered_names = ['dores', 'sistemas', 'relacoes', 'processos']
+    results_list = [results_map.get(name, {}) for name in ordered_names]
+
+    has_data = any(results_list)
+
+    if has_data:
+        save_successful_results(entrevistado_id, chunk_id, results_list)
         consecutive_errors = 0
         return True
 
@@ -198,7 +247,8 @@ def save_successful_results(
                 'id_entrevistado': entrevistado_id,
                 'id_bloco': chunk_id,
                 'tipo': rel.get("tipo"),
-                'pessoa_ou_area': rel.get("contraparte"),
+                'pessoa_citada': rel.get("pessoa_citada"),
+                'area_citada': rel.get("area_citada"),
                 'contexto': rel.get("contexto")
             })
 
@@ -257,6 +307,7 @@ async def run_batch_pipeline():
 
     ai = GeminiProvider(api_key=api_key)
     glossary = build_integrated_glossary()
+    orchestrator = AgentOrchestrator()  # Filtro inteligente
 
     # Busca chunks pendentes
     import sqlite3
@@ -300,7 +351,7 @@ async def run_batch_pipeline():
             process_one_chunk(
                 c["id"], c["ent_id"], c["conteudo"],
                 {"nome": c["nome"], "cargo": c["cargo"]},
-                glossary, ai
+                glossary, ai, orchestrator
             )
             for c in batch
         ]

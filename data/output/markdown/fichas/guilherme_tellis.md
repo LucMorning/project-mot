@@ -1,21 +1,20 @@
-# Ficha: Guilherme Tellis
+# Ficha de Diagnóstico As-Is: Guilherme Tellis
 
 ## 👤 Perfil Organizacional
 - **Cargo**: Não Identificado (Arquivo Extra)
 - **Área**: Não informada
 - **Diretoria**: N/A
 - **Nível**: N/A
-- **Status de Revisão IA**: `EM_PROGRESSO`
 
-> ⚠️ **Atenção:** Esta entrevista ainda não foi processada pela Inteligência Artificial. Os insights detalhados não estão disponíveis.
+> ⚠️ **Atenção:** Esta entrevista ainda não possui insights processados pela IA.
 
-## 🖥️ Ecossistema e Sistemas (As-Is)
-*Nenhum sistema registrado.*
+## 🖥️ Ecossistema de Sistemas e Workarounds
+*Nenhum sistema registrado para este entrevistado.*
 
-## 🔥 Dores, Gargalos e Insights Principais
-*Nenhum insight capturado.*
-## 🤝 Mapa de Relações (Stakeholders)
-*Nenhuma relação mapeada.*
+## 🔥 Dores, Gargalos e Diagnósticos
+*Nenhum ponto de dor capturado até o momento.*
+## 🤝 Mapa de Relações e Stakeholders
+*Nenhuma relação mapeada para este entrevistado.*
 
 ---
-*Ficha gerada automaticamente pelo Pipeline Analyzer da MOTIVA/Veron.*
+*Relatório gerado pelo Pipeline Sênior MOTIVA | Veron Consultoria.*
