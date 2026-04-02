@@ -1,0 +1,17 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.env
+
+# Banco de dados local (pode ser gerado localmente)
+data/output/motiva.db
+*.sqlite3
+
+# Arquivos temporários
+.DS_Store
+Thumbs.db
