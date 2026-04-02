@@ -53,7 +53,8 @@ def init_db(db_path: Path):
         texto_extraido TEXT,
         responsabilidades TEXT,
         competencias TEXT,
-        area_atuacao TEXT
+        area_atuacao TEXT,
+        desafios TEXT
     );
     """)
 
@@ -96,6 +97,20 @@ def init_db(db_path: Path):
         etapa_cadeia TEXT,
         satisfacao TEXT,        -- 'Positivo', 'Neutro', 'Negativo'
         workaround TEXT         -- O que ele faz pra contornar (Planilha, Copy/Paste)
+    );
+    """)
+
+    # Tabela 7: Validação Cruzada (Etapa 3 do Pipeline)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS cross_validation (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entrevistado_id INTEGER REFERENCES entrevistados(id),
+        padroes_confirmados TEXT,      -- JSON array de strings
+        contradicoes TEXT,             -- JSON array de strings
+        novos_insights TEXT,           -- JSON array de strings
+        severidade_ajustada TEXT,      -- 'Alta', 'Media', 'Baixa' - ajuste baseado no contexto
+        num_referencias INTEGER,       -- Quantas entrevistas anteriores foram usadas como contexto
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
 

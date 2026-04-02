@@ -49,7 +49,7 @@ def run_integrity_check():
     cursor.execute("SELECT count(*) FROM cargos")
     total_cargos_extraidos = cursor.fetchone()[0]
     
-    arquivos_pdf_fisicos = list(CARGOS_DIR.glob("*.pdf")) if CARGOS_DIR.exists() else []
+    arquivos_pdf_fisicos = list(CARGOS_DIR.rglob("*.pdf")) if CARGOS_DIR.exists() else []
     print(f"[QA 3] PDFs físicos na pasta /cargos: {len(arquivos_pdf_fisicos)}")
     print(f"[QA 3] Textos Extraídos (Tabela Cargos): {total_cargos_extraidos}")
     

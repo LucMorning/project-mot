@@ -27,11 +27,15 @@ LISTA_ENTREVISTAS = RAW_DIR / "lista_entrevistas.xlsx"
 RELATORIO_TI      = RAW_DIR / "relatorio_sistemas_ti_romulo.xlsx"
 
 # ── API / IA ───────────────────────────────────────────────────────────
-AI_PROVIDER = "openai"  # "openai" | "gemini" | "anthropic" | "ollama"
-AI_MODEL    = "gpt-4o"
-AI_API_KEY_ENV = "OPENAI_API_KEY"
+AI_PROVIDER = "gemini"  # "openai" | "gemini" | "anthropic" | "ollama"
+AI_MODEL    = "gemini-2.0-flash"  # Modelos disponíveis: gemini-2.0-flash, gemini-2.5-flash
+AI_API_KEY_ENV = "GEMINI_API_KEY"
 AI_MAX_RETRIES = 3
 AI_RETRY_DELAY = 5  # segundos
+
+# Pipeline Multi-Etapas
+BATCH_SIZE = 3  # Número de entrevistados processados em paralelo
+CONTEXT_INSIGHTS_LIMIT = 15  # Número de insights anteriores usados como contexto
 
 # ── CADEIA DE VALOR (7 ETAPAS) ─────────────────────────────────────────
 CADEIA_VALOR = {
