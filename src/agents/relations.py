@@ -11,17 +11,18 @@ from .base import IAgent
 # PYDANTIC SCHEMA
 # ─────────────────────────────────────────────────────────────
 
-class RelacaoMapeada(BaseModel):
-    """Representa uma relação/dependência identificada."""
+class RelationMapped(BaseModel):
+    """Represents a relationship/dependency identified."""
     tipo: str = Field(description="'responde_a', 'se_relaciona_com', 'depende_de', 'approva', 'fornece_dados_para'")
-    contraparte: str = Field(description="Nome da pessoa ou área mencionada")
+    pessoa_citada: str = Field(description="Nome da pessoa mencionada ou 'N/A'")
+    area_citada: str = Field(description="Nome da área/departamento mencionado ou 'N/A'")
     contexto: str = Field(description="Por que existe essa relação")
 
 
-class RelacoesAgentSchema(BaseModel):
-    """Schema de saída do Agent de Relações."""
+class RelationsAgentSchema(BaseModel):
+    """Output schema for Relations Agent."""
     resumo_rede: str = Field(description="Resumo de 2-3 frases sobre a rede de relacionamentos")
-    relacoes: list[RelacaoMapeada]
+    relacoes: list[RelationMapped]
     stakeholders: list[str] = Field(description="Pessoas e áreas mencionadas")
     areas_mencionadas: list[str] = Field(description="Áreas/departamentos citados")
 
@@ -59,10 +60,10 @@ class RelationsAgent(IAgent):
     """Agent especializado em mapear rede de stakeholders e relacionamentos."""
 
     def get_name(self) -> str:
-        return "relacoes"
+        return "relations"
 
     def get_schema(self) -> type:
-        return RelacoesAgentSchema
+        return RelationsAgentSchema
 
     def get_system_prompt(self) -> str:
         return SYSTEM_PROMPT

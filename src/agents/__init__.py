@@ -9,10 +9,10 @@ Agents Package - Multi-agent system para análise CAPEX.
 """
 from typing import List, Dict
 from .base import IAgent
-from .dores import DoresAgent, DoresAgentSchema
-from .sistemas import SystemsAgent, SistemasAgentSchema
-from .relacoes import RelationsAgent, RelacoesAgentSchema
-from .processos import ProcessesAgent, ProcessesAgentSchema
+from .pain_points import PainPointsAgent, PainPointsAgentSchema
+from .systems import SystemsAgent, SystemsAgentSchema
+from .relations import RelationsAgent, RelationsAgentSchema
+from .processes import ProcessesAgent, ProcessesAgentSchema
 
 
 # ─────────────────────────────────────────────────────────────
@@ -20,24 +20,24 @@ from .processos import ProcessesAgent, ProcessesAgentSchema
 # ─────────────────────────────────────────────────────────────
 
 AGENT_REGISTRY: Dict[str, IAgent] = {
-    "dores": DoresAgent(),
-    "sistemas": SystemsAgent(),
-    "relacoes": RelationsAgent(),
-    "processos": ProcessesAgent(),
+    "pain_points": PainPointsAgent(),
+    "systems": SystemsAgent(),
+    "relations": RelationsAgent(),
+    "processes": ProcessesAgent(),
 }
 
 
 def get_agent(agent_name: str) -> IAgent:
     """Retorna um agent pelo nome."""
     if agent_name not in AGENT_REGISTRY:
-        available = list(ACTIVE_AGENTS.keys())
+        available = list(AGENT_REGISTRY.keys())
         raise ValueError(f"Agent desconhecido: {agent_name}. Disponíveis: {available}")
     return AGENT_REGISTRY[agent_name]
 
 
 def get_all_agents() -> List[IAgent]:
     """Retorna todos os agents disponíveis."""
-    return list(ACTIVE_AGENTS.values())
+    return list(AGENT_REGISTRY.values())
 
 
 # Alias para compatibilidade
@@ -45,8 +45,8 @@ ACTIVE_AGENTS = AGENT_REGISTRY
 
 __all__ = [
     'IAgent',
-    'DoresAgent', 'DoresAgentSchema',
-    'SystemsAgent', 'SistemasAgentSchema',
+    'PainPointsAgent', 'PainPointsAgentSchema',
+    'SystemsAgent', 'SystemsAgentSchema',
     'RelationsAgent', 'RelationsAgentSchema',
     'ProcessesAgent', 'ProcessesAgentSchema',
     'AGENT_REGISTRY',

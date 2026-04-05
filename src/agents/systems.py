@@ -11,8 +11,8 @@ from .base import IAgent
 # PYDANTIC SCHEMA
 # ─────────────────────────────────────────────────────────────
 
-class SistemaMapeado(BaseModel):
-    """Representa um sistema/ferramenta mapeado."""
+class SystemMapped(BaseModel):
+    """Represents a system/tool mapped."""
     nome_sistema: str = Field(description="Nome do sistema ou ferramenta")
     etapa_cadeia: str = Field(description="Em qual das 7 etapas é usado")
     finalidade: str = Field(description="Para quê é usado (objetivo)")
@@ -21,10 +21,10 @@ class SistemaMapeado(BaseModel):
     problema_principal: str = Field(description="Principal problema citado ou 'Nenhum'")
 
 
-class SistemasAgentSchema(BaseModel):
-    """Schema de saída do Agent de Sistemas."""
+class SystemsAgentSchema(BaseModel):
+    """Output schema for Systems Agent."""
     resumo_ecossistema: str = Field(description="Resumo de 2-3 frases sobre o ecossistema de sistemas")
-    sistemas: list[SistemaMapeado]
+    sistemas: list[SystemMapped]
     integracoes: list[dict]
     sistemas_criticados: list[str] = Field(description="Lista de sistemas mais criticados")
 
@@ -73,10 +73,10 @@ class SystemsAgent(IAgent):
     """Agent especializado em mapear ecossistema de sistemas e integrações."""
 
     def get_name(self) -> str:
-        return "sistemas"
+        return "systems"
 
     def get_schema(self) -> type:
-        return SistemasAgentSchema
+        return SystemsAgentSchema
 
     def get_system_prompt(self) -> str:
         return SYSTEM_PROMPT
@@ -85,6 +85,6 @@ class SystemsAgent(IAgent):
         """Keywords que identificam se este agent é necessário."""
         return [
             'sap', 'sistema', 'aplicativo', 'ferramenta', 'software',
-            'plataforma', 'ferramenta', 'uso', 'utiliza', 'acessa',
+            'plataforma', 'uso', 'utiliza', 'acessa',
             'integra', 'conversa', 'conecta'
         ]

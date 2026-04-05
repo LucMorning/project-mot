@@ -39,27 +39,27 @@ def run_ingestion(skip_existing: bool = False):
     print("="*60 + "\n")
 
     # 1. Entrevistados (base - tudo depende disso)
-    print("[1/5] Ingestão de metadados (Excel → Entrevistados)...")
+    print("[1/5] Ingestao de metadados (Excel -> Entrevistados)...")
     ingest_master_spreadsheet()
 
     # 2. Cargos (PDFs)
-    print("\n[2/5] Extração de PDFs (Cargos → Banco)...")
+    print("\n[2/5] Extracao de PDFs (Cargos -> Banco)...")
     ingest_cargos()
 
     # 3. Transcrições (DOCX)
-    print("\n[3/5] Extração de DOCX (Transcrições → Banco)...")
+    print("\n[3/5] Extracao de DOCX (Transcricoes -> Banco)...")
     ingest_transcripts()
 
     # 4. Sistemas TI (catálogo)
-    print("\n[4/5] Ingestão de catálogo de Sistemas TI...")
+    print("\n[4/5] Ingestao de catalogo de Sistemas TI...")
     map_sistemas_ti_to_db()
 
-    # 5. Links (cargo ↔ pessoa)
-    print("\n[5/5] Linkagem de Entrevistados ↔ Cargos...")
+    # 5. Links (cargo <-> pessoa)
+    print("\n[5/5] Linkagem de Entrevistados <-> Cargos...")
     link_roles_to_interviewees()
 
     print("\n" + "="*60)
-    print("INGESTION WORKFLOW - Concluído!")
+    print("INGESTION WORKFLOW - Concluido!")
     print("="*60 + "\n")
 
 

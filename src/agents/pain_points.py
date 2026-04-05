@@ -11,8 +11,8 @@ from .base import IAgent
 # PYDANTIC SCHEMA
 # ─────────────────────────────────────────────────────────────
 
-class DorIdentificada(BaseModel):
-    """Representa uma dor/ponto de dor identificado."""
+class PainPoint(BaseModel):
+    """Represents a pain point identified."""
     etapa_cadeia_valor: str = Field(description="Qual das 7 etapas da cadeia de valor")
     subcategoria: str = Field(description="Tipo específico: 'ETL Humano', 'Silo', 'Gargalo', 'Erro Manual', 'Falta Integração', etc")
     descricao: str = Field(description="Descrição detalhada do problema")
@@ -21,10 +21,10 @@ class DorIdentificada(BaseModel):
     impacto: str = Field(description="'Alto', 'Médio', 'Baixo' - impacto no negócio/CAPEX")
 
 
-class DoresAgentSchema(BaseModel):
-    """Schema de saída do Agent de Dores."""
+class PainPointsAgentSchema(BaseModel):
+    """Output schema for Pain Points Agent."""
     resumo_dores: str = Field(description="Resumo de 2-3 frases sobre o cenário geral de dores")
-    dores: list[DorIdentificada]
+    dores: list[PainPoint]
     nivel_maturidade: str = Field(description="'Imaturo', 'Em Transição', 'Maduro' - avaliação geral da maturidade digital")
 
 
@@ -60,14 +60,14 @@ Fill the JSON strictly according to the Schema."""
 # AGENT CLASS
 # ─────────────────────────────────────────────────────────────
 
-class DoresAgent(IAgent):
+class PainPointsAgent(IAgent):
     """Agent especializado em identificar dores, gargalos e ETLs humanos."""
 
     def get_name(self) -> str:
-        return "dores"
+        return "pain_points"
 
     def get_schema(self) -> type:
-        return DoresAgentSchema
+        return PainPointsAgentSchema
 
     def get_system_prompt(self) -> str:
         return SYSTEM_PROMPT

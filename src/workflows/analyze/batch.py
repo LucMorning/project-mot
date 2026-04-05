@@ -20,52 +20,13 @@ import dotenv
 from src.config import DB_PATH
 from src.agents import get_all_agents
 from src.database.repositories import (
-    InsightsRepository, SistemasUsoRepository, RelacoesRepository
+    InsightsRepository, SistemasUsoRepository, RelacoesRepository, ChunksRepository
 )
+from src.providers.gemini_provider import GeminiProvider
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 # Configurações de escala blindada
-BATCH_SIZE = 5
-BATCH_SLEEP = 30
-MODEL_NAME = "gemini-2.5-flash"
-ERROR_THRESHOLD = 3
-
-# Contador de erros consecutivos
-consecutive_errors = 0
-
-
-# ─────────────────────────────────────────────────────────────
-# IA PROVIDER
-# ─────────────────────────────────────────────────────────────
-
-class GeminiProvider:
-    def __init__(self, api_key: str, model_name: str = MODEL_NAME):
-        self.client = genai.Client(api_key=api_key)
-        self.model_name = model_name
-
-    def analyze(self, system_prompt: str, user_content: str, schema) -> Dict[str, Any]:
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=user_content,
-                config={
-                    'system_instruction': system_prompt,
-                    'response_mime_type': 'application/json',
-                    'response_schema': schema,
-                    'temperature': 0.1
-                }
-            )
-            
-            # O novo SDK retorna o objeto já parseado ou acessível via .parsed
-            if hasattr(response, 'parsed') and response.parsed:
-                # Converte o objeto Pydantic retornado em dicionário
-                return response.parsed.model_dump() if hasattr(response.parsed, 'model_dump') else response.parsed
-                
-            return json.loads(response.text)
-        except Exception as e:
-            print(f"[ERRO] Novo SDK Gemini: {e}")
-            raise e
 
 
 # ─────────────────────────────────────────────────────────────
@@ -99,8 +60,8 @@ class AgentOrchestrator:
             if any(kw in chunk_lower for kw in keywords):
                 needed.append(agent.get_name())
 
-        # Sempre executa pelo menos 1 (dores como fallback)
-        return needed if needed else ['dores']
+        # Sempre executa pelo menos 1 (pain_points como fallback)
+        return needed if needed else ['pain_points']
 
 
 # ─────────────────────────────────────────────────────────────
@@ -181,8 +142,8 @@ async def process_one_chunk(
             if "429" in str(e):  # Rate limit
                 consecutive_errors += 1
 
-    # Converte para lista ordenado (dores, sistemas, relacoes, processos)
-    ordered_names = ['dores', 'sistemas', 'relacoes', 'processos']
+    # Converte para lista ordenado (pain_points, systems, relations, processes)
+    ordered_names = ['pain_points', 'systems', 'relations', 'processes']
     results_list = [results_map.get(name, {}) for name in ordered_names]
 
     has_data = any(results_list)
@@ -201,16 +162,18 @@ def save_successful_results(
     results_list: List[Dict]
 ) -> None:
     """
-    Salva resultados dos 4 agentes usando repositories.
+    Salva resultados dos 4 agentes usando repositories com UPSERT.
 
-    Aplica DRY: SQL não se repite, usa repositories.
+    - Sistemas: consolida por (entrevistado, sistema) evitando duplicatas
+    - Relações: filtra "N/A" e consolida por (entrevistado, pessoa_citada)
+    - Insights: mantém por chunk (cada dor é única)
     """
     insights_repo = InsightsRepository(DB_PATH)
     sistemas_repo = SistemasUsoRepository(DB_PATH)
     relacoes_repo = RelacoesRepository(DB_PATH)
 
     try:
-        # 1. Dores
+        # 1. Dores (mantém insert - cada insight é único)
         dores = results_list[0].get("dores", [])
         for dor in dores:
             insights_repo.insert({
@@ -227,10 +190,11 @@ def save_successful_results(
                 'modelo_ia': MODEL_NAME
             })
 
-        # 2. Sistemas
+        # 2. Sistemas (UPSERT - consolida por entrevistado + sistema)
         sistemas = results_list[1].get("sistemas", [])
+        sistemas_upserted = 0
         for sis in sistemas:
-            sistemas_repo.insert({
+            result_id = sistemas_repo.upsert({
                 'id_entrevistado': entrevistado_id,
                 'id_bloco': chunk_id,
                 'sistema': sis.get("nome_sistema"),
@@ -239,11 +203,18 @@ def save_successful_results(
                 'satisfacao': sis.get("satisfacao"),
                 'workaround': sis.get("problema_principal")
             })
+            if result_id:
+                sistemas_upserted += 1
 
-        # 3. Relações
+        # 3. Relações (UPSERT - consolida por pessoa, filtra N/A)
+        _INVALID_NAMES = {'N/A', 'NÃO INFORMADO', 'NA', 'NONE', ''}
         relacoes = results_list[2].get("relacoes", [])
+        relacoes_upserted = 0
         for rel in relacoes:
-            relacoes_repo.insert({
+            pessoa = (rel.get("pessoa_citada") or '').strip().upper()
+            if pessoa in _INVALID_NAMES:
+                continue
+            result_id = relacoes_repo.upsert({
                 'id_entrevistado': entrevistado_id,
                 'id_bloco': chunk_id,
                 'tipo': rel.get("tipo"),
@@ -251,8 +222,10 @@ def save_successful_results(
                 'area_citada': rel.get("area_citada"),
                 'contexto': rel.get("contexto")
             })
+            if result_id:
+                relacoes_upserted += 1
 
-        # 4. Processos (como insights)
+        # 4. Processos (mantém insert - cada fluxo é único)
         processos = results_list[3].get("fluxos", [])
         for fluxo in processos:
             insights_repo.insert({
@@ -268,18 +241,10 @@ def save_successful_results(
                 'modelo_ia': MODEL_NAME
             })
 
-        # Marca chunk como processado
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE transcricao_chunks SET status_analise = 'concluido' WHERE id = ?",
-            (chunk_id,)
-        )
-        conn.commit()
-        conn.close()
+        # Marca chunk como processado via repository
+        ChunksRepository(DB_PATH).mark_done(chunk_id)
 
-        print(f"      [SALVO] Chunk {chunk_id} - {len(dores)} dores, {len(sistemas)} sistemas")
+        print(f"      [SALVO] Chunk {chunk_id} - {len(dores)} dores, {sistemas_upserted} sist. (upsert), {relacoes_upserted} rel. (upsert, N/A filtrados)")
 
     except Exception as e:
         print(f"      [ERRO PERSISTÊNCIA]: {e}")
@@ -293,7 +258,7 @@ async def run_batch_pipeline():
     """
     Executa o pipeline batch em lotes com tratamento de erros.
 
-    Processa chunks pendentes em batches com rate limiting entre batches.
+    Processa chunks de 5 entrevistados por vez com rate limiting entre batches.
     Para se houver muitos erros consecutivos (429 rate limit).
     """
     global consecutive_errors
@@ -309,65 +274,103 @@ async def run_batch_pipeline():
     glossary = build_integrated_glossary()
     orchestrator = AgentOrchestrator()  # Filtro inteligente
 
-    # Busca chunks pendentes
     import sqlite3
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    query = """
-        SELECT c.id, c.conteudo, e.id as ent_id, e.nome, e.cargo
-        FROM transcricao_chunks c
-        JOIN transcricoes t ON c.id_transcricao = t.id
-        JOIN entrevistados e ON t.id_entrevistado = e.id
-        WHERE c.status_analise = 'pendente'
-        ORDER BY e.id, c.ordem
-    """
-    cursor.execute(query)
-    chunks = cursor.fetchall()
-    conn.close()
-
-    if not chunks:
-        print("[INFO] Nenhum chunk pendente para processar.")
-        return
-
     print(f"\n{'='*60}")
-    print(f"[BATCH PIPELINE] {len(chunks)} chunks pendentes")
+    print(f"[BATCH PIPELINE] Modo: 5 entrevistados por vez")
     print(f"{'='*60}")
     print(f"Modelo: {MODEL_NAME}")
     print(f"Batch Size: {BATCH_SIZE}")
     print(f"Sleep entre batches: {BATCH_SLEEP}s")
     print(f"{'='*60}\n")
 
-    for i in range(0, len(chunks), BATCH_SIZE):
+    # Loop: processa 5 entrevistados por vez
+    round_num = 0
+    while True:
         if consecutive_errors >= ERROR_THRESHOLD:
             print(f"\n[PARADA] Muitos erros consecutivos ({consecutive_errors})")
             break
 
-        batch = chunks[i:i + BATCH_SIZE]
-        print(f"\n[BATCH {i//BATCH_SIZE + 1}] Processando {len(batch)} chunks...")
+        # Busca IDs de 5 entrevistados com chunks pendentes
+        cursor.execute("""
+            SELECT DISTINCT e.id, e.nome
+            FROM transcricao_chunks c
+            JOIN transcricoes t ON c.id_transcricao = t.id
+            JOIN entrevistados e ON t.id_entrevistado = e.id
+            WHERE c.status_analise = 'pendente'
+            ORDER BY e.id
+            LIMIT 5
+        """)
+        entrevistados = cursor.fetchall()
 
-        tasks = [
-            process_one_chunk(
-                c["id"], c["ent_id"], c["conteudo"],
-                {"nome": c["nome"], "cargo": c["cargo"]},
-                glossary, ai, orchestrator
-            )
-            for c in batch
-        ]
+        if not entrevistados:
+            print("\n[INFO] Todos os chunks foram processados!")
+            break
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        success = sum(1 for r in results if r is True)
-        errors = sum(1 for r in results if r is not True)
+        round_num += 1
+        ent_ids = [e["id"] for e in entrevistados]
+        ent_nomes = [e["nome"] for e in entrevistados]
 
-        print(f"  Resultado: {success} sucessos, {errors} erros")
+        print(f"\n[RODADA {round_num}] Entrevistados: {ent_nomes}")
+        print(f"  IDs: {ent_ids}")
 
-        if i + BATCH_SIZE < len(chunks):
-            print(f"  Aguardando {BATCH_SLEEP}s antes do próximo batch...")
-            await asyncio.sleep(BATCH_SLEEP)
+        # Busca chunks desses entrevistados
+        query = """
+            SELECT c.id, c.conteudo, e.id as ent_id, e.nome, e.cargo
+            FROM transcricao_chunks c
+            JOIN transcricoes t ON c.id_transcricao = t.id
+            JOIN entrevistados e ON t.id_entrevistado = e.id
+            WHERE c.status_analise = 'pendente'
+            AND e.id IN ({})
+            ORDER BY e.id, c.ordem
+        """.format(','.join(map(str, ent_ids)))
+        cursor.execute(query)
+        chunks = cursor.fetchall()
+
+        if not chunks:
+            print(f"  [AVISO] Nenhum chunk pendente encontrado para esses entrevistados")
+            continue
+
+        print(f"  Chunks para processar: {len(chunks)}")
+
+        # Processa em batches
+        for i in range(0, len(chunks), BATCH_SIZE):
+            if consecutive_errors >= ERROR_THRESHOLD:
+                print(f"\n[PARADA] Muitos erros consecutivos ({consecutive_errors})")
+                break
+
+            batch = chunks[i:i + BATCH_SIZE]
+            print(f"\n  [BATCH {i//BATCH_SIZE + 1}] Processando {len(batch)} chunks...")
+
+            tasks = [
+                process_one_chunk(
+                    c["id"], c["ent_id"], c["conteudo"],
+                    {"nome": c["nome"], "cargo": c["cargo"]},
+                    glossary, ai, orchestrator
+                )
+                for c in batch
+            ]
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            success = sum(1 for r in results if r is True)
+            errors = sum(1 for r in results if r is not True)
+
+            print(f"    Resultado: {success} sucessos, {errors} erros")
+
+            if i + BATCH_SIZE < len(chunks):
+                print(f"    Aguardando {BATCH_SLEEP}s...")
+                await asyncio.sleep(BATCH_SLEEP)
+
+        if consecutive_errors >= ERROR_THRESHOLD:
+            break
+
+    conn.close()
 
     print(f"\n{'='*60}")
-    print(f"[BATCH PIPELINE] Concluído")
+    print(f"[BATCH PIPELINE] Concluído após {round_num} rodadas")
     print(f"{'='*60}\n")
 
 

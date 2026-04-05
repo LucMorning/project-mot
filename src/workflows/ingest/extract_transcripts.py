@@ -34,20 +34,16 @@ def ingest_transcripts():
     transcript_repo = TranscricoesRepository(DB_PATH)
     entrevistado_repo = EntrevistadosRepository(DB_PATH)
 
-    # Busca entrevistados com transcrições
-    conn = EntrevistadosRepository(DB_PATH)._get_conn()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, arquivo_transcricao FROM entrevistados WHERE arquivo_transcricao IS NOT NULL"
-    )
-    rows = cursor.fetchall()
-    conn.close()
+    # Busca entrevistados com transcrições via repository (sem SQL direto)
+    rows_raw = entrevistado_repo.get_all_with_transcricao()
 
     # Write truncate: limpa transcrições antes de reingetar
     transcript_repo.delete_all()
 
     count = 0
-    for entrevistado_id, file_name in rows:
+    for row in rows_raw:
+        entrevistado_id = row['id']
+        file_name = row['arquivo_transcricao']
         file_path = TRANSCRICOES_DIR / file_name
 
         if not file_path.exists():

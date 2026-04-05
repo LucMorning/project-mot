@@ -27,8 +27,8 @@ class FluxoTrabalho(BaseModel):
     rupturas: list[str] = Field(description="Onde o fluxo quebra ou tem problemas")
 
 
-class ProcessosAgentSchema(BaseModel):
-    """Schema de saída do Agent de Processos."""
+class ProcessesAgentSchema(BaseModel):
+    """Output schema for Processes Agent."""
     resumo_processos: str = Field(description="Resumo de 2-3 frases sobre os processos mencionados")
     etapas_mapeadas: list[EtapaProcesso]
     fluxos: list[FluxoTrabalho]
@@ -81,10 +81,10 @@ class ProcessesAgent(IAgent):
     """Agent especializado em mapear processos e fluxos de trabalho."""
 
     def get_name(self) -> str:
-        return "processos"
+        return "processes"
 
     def get_schema(self) -> type:
-        return ProcessosAgentSchema
+        return ProcessesAgentSchema
 
     def get_system_prompt(self) -> str:
         return SYSTEM_PROMPT

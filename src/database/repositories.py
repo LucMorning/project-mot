@@ -31,6 +31,20 @@ class BaseRepository:
             print(f"Params: {params}")
             raise e
 
+    def _extract_params(self, dados: Dict, fields: list, defaults: dict = None) -> tuple:
+        """
+        Extrai tupla de params de um dict para uso em INSERT/UPDATE.
+
+        Elimina o boilerplate de dados.get('campo') repetido em cada insert().
+
+        Args:
+            dados: Dicionário de dados de entrada
+            fields: Lista de chaves a extrair, em ordem dos placeholders (?)
+            defaults: Valores padrão opcionais {campo: valor_default}
+        """
+        _defaults = defaults or {}
+        return tuple(dados.get(field, _defaults.get(field)) for field in fields)
+
 # ─────────────────────────────────────────────────────────────
 # ENTREVISTADOS REPOSITORY
 # ─────────────────────────────────────────────────────────────
@@ -42,25 +56,17 @@ class EntrevistadosRepository(BaseRepository):
         """Insere um novo ator e retorna o ID."""
         query = """
             INSERT INTO entrevistados (
-                nome, cargo, diretoria, plataforma, area, nivel, 
-                dt_entrevista, tipo_entrevista, arquivo_transcricao, 
+                nome, cargo, diretoria, plataforma, area, nivel,
+                dt_entrevista, tipo_entrevista, arquivo_transcricao,
                 arquivo_cargo_pdf, status_revisao
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        params = (
-            dados.get('nome'),
-            dados.get('cargo'),
-            dados.get('diretoria'),
-            dados.get('plataforma'),
-            dados.get('area'),
-            dados.get('nivel'),
-            dados.get('dt_entrevista'),
-            dados.get('tipo_entrevista'),
-            dados.get('arquivo_transcricao'),
-            dados.get('arquivo_cargo_pdf'),
-            dados.get('status_revisao', 'pendente')
-        )
-        return self._execute(query, params)
+        fields = [
+            'nome', 'cargo', 'diretoria', 'plataforma', 'area', 'nivel',
+            'dt_entrevista', 'tipo_entrevista', 'arquivo_transcricao',
+            'arquivo_cargo_pdf', 'status_revisao',
+        ]
+        return self._execute(query, self._extract_params(dados, fields, {'status_revisao': 'pendente'}))
 
     def get_pending(self, limit: int = 100) -> List[Dict]:
         """Retorna lista de entrevistados com análise pendente."""
@@ -87,6 +93,14 @@ class EntrevistadosRepository(BaseRepository):
             (status, entrevistado_id)
         )
 
+    def get_all_with_transcricao(self) -> list:
+        """Retorna todos os entrevistados que possuem arquivo de transcrição vinculado."""
+        rows = self._execute(
+            "SELECT id, arquivo_transcricao FROM entrevistados WHERE arquivo_transcricao IS NOT NULL",
+            fetch=True
+        )
+        return [{'id': r[0], 'arquivo_transcricao': r[1]} for r in rows]
+
 # ─────────────────────────────────────────────────────────────
 # TRANSCRICOES REPOSITORY
 # ─────────────────────────────────────────────────────────────
@@ -95,27 +109,22 @@ class TranscricoesRepository(BaseRepository):
     """Repository para tabela transcricoes."""
 
     def delete_all(self) -> int:
-        """Remove todas as transcrições."""
+        """Remove todas as transcrições (com CASCADE para chunks)."""
+        # Primeiro deleta chunks (dependentes)
+        self._execute("DELETE FROM transcricao_chunks")
+        # Depois deleta transcrições
         return self._execute("DELETE FROM transcricoes")
 
     def insert(self, dados: Dict) -> int:
-        """
-        Insere uma transcrição.
-        """
+        """Insere uma transcrição."""
         query = """
             INSERT INTO transcricoes (
                 id_entrevistado, texto_completo, texto_limpo,
                 dt_gravacao, arquivo_origem
             ) VALUES (?, ?, ?, ?, ?)
         """
-        params = (
-            dados.get('id_entrevistado'),
-            dados.get('texto_completo'),
-            dados.get('texto_limpo'),
-            dados.get('dt_gravacao'),
-            dados.get('arquivo_origem')
-        )
-        return self._execute(query, params)
+        fields = ['id_entrevistado', 'texto_completo', 'texto_limpo', 'dt_gravacao', 'arquivo_origem']
+        return self._execute(query, self._extract_params(dados, fields))
 
 # ─────────────────────────────────────────────────────────────
 # CARGOS REPOSITORY
@@ -138,21 +147,13 @@ class CargosRepository(BaseRepository):
                 formacao, idiomas, experiencia
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        params = (
-            dados.get('titulo_cargo'),
-            dados.get('arquivo_pdf'),
-            dados.get('texto_extraido'),
-            dados.get('negocio_plataforma'),
-            dados.get('diretoria'),
-            dados.get('area_atuacao'),
-            dados.get('missao'),
-            dados.get('desafios'),
-            dados.get('responsabilidades'),
-            dados.get('formacao'),
-            dados.get('idiomas'),
-            dados.get('experiencia')
-        )
-        return self._execute(query, params)
+        fields = [
+            'titulo_cargo', 'arquivo_pdf', 'texto_extraido',
+            'negocio_plataforma', 'diretoria', 'area_atuacao',
+            'missao', 'desafios', 'responsabilidades',
+            'formacao', 'idiomas', 'experiencia',
+        ]
+        return self._execute(query, self._extract_params(dados, fields))
 
 # ─────────────────────────────────────────────────────────────
 # INSIGHTS IA REPOSITORY
@@ -169,7 +170,12 @@ class InsightsRepository(BaseRepository):
         )
 
     def insert(self, dados: Dict) -> int:
-        """Insere um insight."""
+        """
+        Insere um insight.
+
+        Nota: usa params explícitos em vez de _extract_params pois
+        sistemas_envolvidos requer json.dumps() e confianca tem default 0.9.
+        """
         query = """
             INSERT INTO insights_ia (
                 id_entrevistado, id_bloco, etapa_cadeia, categoria, subcategoria,
@@ -234,23 +240,60 @@ class SistemasUsoRepository(BaseRepository):
         )
 
     def insert(self, dados: Dict) -> int:
-        """Insiste registro de uso de sistema."""
+        """Insere registro de uso de sistema."""
         query = """
             INSERT INTO sistemas_uso (
                 id_entrevistado, id_bloco, sistema, como_usa, etapa_cadeia,
                 satisfacao, workaround
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """
-        params = (
-            dados.get('id_entrevistado'),
-            dados.get('id_bloco'),
-            dados.get('sistema'),
-            dados.get('como_usa'),
-            dados.get('etapa_cadeia'),
-            dados.get('satisfacao'),
-            dados.get('workaround')
-        )
-        return self._execute(query, params)
+        fields = ['id_entrevistado', 'id_bloco', 'sistema', 'como_usa', 'etapa_cadeia', 'satisfacao', 'workaround']
+        return self._execute(query, self._extract_params(dados, fields))
+
+    def upsert(self, dados: Dict) -> int:
+        """
+        Insere ou atualiza sistema (consolida por entrevistado + sistema).
+
+        Se já existe, adiciona o novo contexto ao existente.
+        """
+        sistema = dados.get('sistema')
+        entrevistado_id = dados.get('id_entrevistado')
+        novo_contexto = dados.get('como_usa', '')
+        nova_etapa = dados.get('etapa_cadeia', '')
+
+        # Verifica se já existe
+        check_query = """
+            SELECT id, como_usa, etapa_cadeia, workaround
+            FROM sistemas_uso
+            WHERE id_entrevistado = ? AND LOWER(sistema) = LOWER(?)
+        """
+        rows = self._execute(check_query, (entrevistado_id, sistema), fetch=True)
+
+        if rows:
+            # Já existe - atualiza consolidando informações
+            existing_id, como_usa, etapa_cadeia, workaround = rows[0]
+
+            # Consolida etapas (sem duplicar)
+            etapas = set(etapa_cadeia.split(', ')) if etapa_cadeia else set()
+            etapas.update(nova_etapa.split(', ')) if nova_etapa else None
+            etapas.discard('')
+            etapa_consolidada = ', '.join(sorted(etapas))
+
+            # Consolida workaround se não tiver
+            workaround_consolidado = workaround or dados.get('workaround', '')
+
+            update_query = """
+                UPDATE sistemas_uso
+                SET como_usa = ?,
+                    etapa_cadeia = ?,
+                    workaround = ?
+                WHERE id = ?
+            """
+            self._execute(update_query, (novo_contexto, etapa_consolidada, workaround_consolidado, existing_id))
+            return existing_id
+        else:
+            # Não existe - insere novo
+            return self.insert(dados)
 
 # ─────────────────────────────────────────────────────────────
 # RELACOES REPOSITORY
@@ -273,15 +316,49 @@ class RelacoesRepository(BaseRepository):
                 id_entrevistado, id_bloco, tipo, pessoa_citada, area_citada, contexto
             ) VALUES (?, ?, ?, ?, ?, ?)
         """
-        params = (
-            dados.get('id_entrevistado'),
-            dados.get('id_bloco'),
-            dados.get('tipo'),
-            dados.get('pessoa_citada'),
-            dados.get('area_citada'),
-            dados.get('contexto')
-        )
-        return self._execute(query, params)
+        fields = ['id_entrevistado', 'id_bloco', 'tipo', 'pessoa_citada', 'area_citada', 'contexto']
+        return self._execute(query, self._extract_params(dados, fields))
+
+    def upsert(self, dados: Dict) -> int:
+        """
+        Insere ou atualiza relação (consolida por entrevistado + pessoa citada).
+        """
+        pessoa_citada = dados.get('pessoa_citada', '').strip()
+        entrevistado_id = dados.get('id_entrevistado')
+
+        novo_contexto = dados.get('contexto', '')
+        area_citada = dados.get('area_citada', '')
+
+        # Verifica se já existe (busca por nome aproximado)
+        check_query = """
+            SELECT id, contexto, area_citada
+            FROM relacoes
+            WHERE id_entrevistado = ? AND LOWER(pessoa_citada) = LOWER(?)
+        """
+        rows = self._execute(check_query, (entrevistado_id, pessoa_citada), fetch=True)
+
+        if rows:
+            # Já existe - atualiza contexto
+            existing_id, contexto, area = rows[0]
+
+            # Consolida área se não tiver
+            area_consolidada = area or area_citada
+
+            # Adiciona novo contexto se for diferente
+            contexto_consolidado = contexto
+            if novo_contexto and novo_contexto not in (contexto or ''):
+                contexto_consolidado = f"{contexto or ''} | {novo_contexto}"
+
+            update_query = """
+                UPDATE relacoes
+                SET area_citada = ?, contexto = ?
+                WHERE id = ?
+            """
+            self._execute(update_query, (area_consolidada, contexto_consolidado, existing_id))
+            return existing_id
+        else:
+            # Não existe - insere novo
+            return self.insert(dados)
 
     def get_by_entrevistado(self, entrevistado_id: int) -> List[Dict]:
         """Retorna todas as relações de um entrevistado."""
@@ -297,3 +374,18 @@ class RelacoesRepository(BaseRepository):
             }
             for r in rows
         ]
+
+
+# ─────────────────────────────────────────────────────────────
+# CHUNKS REPOSITORY
+# ─────────────────────────────────────────────────────────────
+
+class ChunksRepository(BaseRepository):
+    """Repository para tabela transcricao_chunks."""
+
+    def mark_done(self, chunk_id: int):
+        """Marca um chunk como analisado/concluiío."""
+        self._execute(
+            "UPDATE transcricao_chunks SET status_analise = 'concluido' WHERE id = ?",
+            (chunk_id,)
+        )

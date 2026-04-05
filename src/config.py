@@ -26,6 +26,10 @@ DB_PATH          = OUTPUT_DIR / "motiva.db"
 LISTA_ENTREVISTAS = RAW_DIR / "lista_entrevistas.xlsx"
 RELATORIO_TI      = RAW_DIR / "relatorio_sistemas_ti_romulo.xlsx"
 
+# ── PADRÕES DE NOME DE ARQUIVO DE TRANSCRIÇÃO ─────────────────
+TRANSCRIPT_PREFIXES   = ["entrevista_as_is_", "aprofundamento_"]
+TRANSCRIPT_EXTENSION  = ".docx"
+
 # ── API / IA ───────────────────────────────────────────────────────────
 AI_PROVIDER = "gemini"  # "openai" | "gemini" | "anthropic" | "ollama"
 AI_MODEL    = "gemini-2.0-flash"  # Modelos disponíveis: gemini-2.0-flash, gemini-2.5-flash
@@ -68,14 +72,14 @@ DORES_KEYWORDS = [
 
 # ── TEMAS PARA ANÁLISE TEMÁTICA ───────────────────────────────────────
 TEMAS_MAP = {
-    "Governança de Portfólio": ["governana", "priorizao", "portflio", "pipeline", "aprovao", "alocao", "investimento"],
-    "Ciclo de Vida e Gates": ["ciclo", "gates", "gate", "fase", "viabilidade", "planejamento", "execuo"],
-    "PMO e Plataformas": ["pmo", "plataforma", "ferramenta", "gesto", "acompanhamento"],
-    "Monitoramento Físico-Financeiro": ["custo", "prazo", "fsico", "financeiro", "orcamento", "capex", "medio"],
-    "Tecnologia e Dados": ["sistema", "integrao", "dashboard", "power bi", "relatrio", "conector", "excel", "manual", "erro de dado"],
+    "Governança de Portfólio": ["governança", "priorização", "portfólio", "pipeline", "aprovação", "alocação", "investimento"],
+    "Ciclo de Vida e Gates": ["ciclo", "gates", "gate", "fase", "viabilidade", "planejamento", "execução"],
+    "PMO e Plataformas": ["pmo", "plataforma", "ferramenta", "gestão", "acompanhamento"],
+    "Monitoramento Físico-Financeiro": ["custo", "prazo", "físico", "financeiro", "orçamento", "capex", "médio"],
+    "Tecnologia e Dados": ["sistema", "integração", "dashboard", "power bi", "relatório", "conector", "excel", "manual", "erro de dado"],
     "Arquitetura de Sistemas": ["sap", "archer", "sic", "vlt", "ferramenta", "software", "api", "banco de dados"],
-    "Gestão Contratual": ["contrato", "pleito", "reivindicao", "jurdico", "faturamento", "fornecedor", "aditivo", "reajuste"],
-    "Processos e Procedimentos": ["norma", "manual", "procedimento", "burocracia", "fluxo", "padro", "instruo"],
-    "Gestão de Mudança e Pessoas": ["comunicao", "equipe", "treinamento", "capacitao", "cultura", "resistncia", "mudana"],
-    "Riscos e Compliance": ["risco", "auditoria", "compliance", "mitigao", "controle", "falha", "segurana"]
+    "Gestão Contratual": ["contrato", "pleito", "reivindicação", "jurídico", "faturamento", "fornecedor", "aditivo", "reajuste"],
+    "Processos e Procedimentos": ["norma", "manual", "procedimento", "burocracia", "fluxo", "padrão", "instrução"],
+    "Gestão de Mudança e Pessoas": ["comunicação", "equipe", "treinamento", "capacitação", "cultura", "resistência", "mudança"],
+    "Riscos e Compliance": ["risco", "auditoria", "compliance", "mitigação", "controle", "falha", "segurança"]
 }

@@ -63,7 +63,7 @@ def run_ai_staged():
     import asyncio
     import os
     import dotenv
-    from src.config import DB_PATH
+    from src.config import DB_PATH, AI_MODEL
 
     dotenv.load_dotenv()
 
@@ -72,7 +72,7 @@ def run_ai_staged():
         print("[ERRO] GEMINI_API_KEY não configurada!")
         return False
 
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_MODEL", AI_MODEL)
     batch_size = int(os.getenv("BATCH_SIZE", "3"))
 
     provider = GeminiProvider(api_key=api_key, model_name=model_name)
