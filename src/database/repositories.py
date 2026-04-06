@@ -141,20 +141,18 @@ class CargosRepository(BaseRepository):
         return self._execute("DELETE FROM stg_cargos")
 
     def insert(self, dados: Dict) -> int:
-        """Insere um cargo."""
+        """Insere um cargo (Schema Minimalista)."""
         query = """
             INSERT INTO stg_cargos (
                 titulo_cargo, arquivo_pdf, texto_extraido,
                 negocio_plataforma, diretoria, area_atuacao,
-                missao, desafios, responsabilidades,
-                formacao, idiomas, experiencia
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                superior_mediato, superior_imediato
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         fields = [
             'titulo_cargo', 'arquivo_pdf', 'texto_extraido',
             'negocio_plataforma', 'diretoria', 'area_atuacao',
-            'missao', 'desafios', 'responsabilidades',
-            'formacao', 'idiomas', 'experiencia',
+            'superior_mediato', 'superior_imediato'
         ]
         return self._execute(query, self._extract_params(dados, fields))
 

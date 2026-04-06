@@ -85,46 +85,27 @@ def normalize_interviewee_name(text: str) -> str:
     Normaliza nomes de entrevistados para deduplicação.
 
     Remove:
-    - Sufixos de reunião (" - A", " - B", etc)
+    - Sufixos de reunião (" - Parte X", " - A", etc)
     - Acentos
-    - Artigos comuns
-    - Sobrenomes do meio (Terra, Rapchan, etc)
+    - Pontuação
 
     Args:
         text: Nome do entrevistado
 
     Returns:
         Nome normalizado para comparação
-
-    Examples:
-        >>> normalize_interviewee_name("Guilherme Tellis - A")
-        'guilherme tellis'
-        >>> normalize_interviewee_name("Tiago Terra Esteves")
-        'tiago esteves'
-        >>> normalize_interviewee_name("Lucas Giraldi Rapchan Aguilar")
-        'lucas aguilar'
-        >>> normalize_interviewee_name("Lucas Giraldi")
-        'lucas giraldi'
     """
     if not text:
         return ""
 
-    t = str(text)
+    t = str(text).strip()
 
-    # Remove sufixos de reunião (" - A", " - B", " - C", etc)
+    # Remove sufixos de reunião e partes
+    t = re.sub(r'\s*-\s*Parte\s+\d+', '', t, flags=re.IGNORECASE)
+    t = re.sub(r'\s+Parte\s+\d+$', '', t, flags=re.IGNORECASE)
     t = re.sub(r'\s*-\s*[A-Z]$', '', t)
 
-    # Aplica normalização padrão
-    t = normalize_for_fuzzy(t)
+    # Aplica normalização básica (acentos, case, etc)
+    t = normalize_text(t)
 
-    # Pega primeira + última parte (remove sobrenomes do meio)
-    # Ex: "tiago terra esteves" → "tiago esteves"
-    # Ex: "lucas giraldi rapchan aguilar" → "lucas aguilar"
-    palavras = t.split()
-
-    if len(palavras) > 2:
-        t = f"{palavras[0]} {palavras[-1]}"
-    else:
-        t = " ".join(palavras)
-
-    return t
+    return t.upper()

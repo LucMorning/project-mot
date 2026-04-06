@@ -31,30 +31,30 @@ def cleanup_duplicate_interviewees(conn):
     cursor = conn.cursor()
 
     # Busca todos
-    cursor.execute("SELECT id, nome, tipo_entrevista FROM stg_entrevistados ORDER BY nome")
+    cursor.execute("SELECT id, nome FROM stg_entrevistados ORDER BY nome")
     todos = cursor.fetchall()
 
-    # Agrupa por nome normalizado + tipo
+    # Agrupa por nome normalizado
     grupos = {}
-    for ent_id, nome, tipo in todos:
+    for ent_id, nome in todos:
         if nome is None:
             continue
 
         norm = normalize_interviewee_name(nome)
-        chave_grupo = (norm, tipo)
+        chave_grupo = norm
 
         if chave_grupo not in grupos:
             grupos[chave_grupo] = []
-        grupos[chave_grupo].append((ent_id, nome, tipo))
+        grupos[chave_grupo].append((ent_id, nome))
 
     # Processa cada grupo - remove duplicatas
     migration_map = {}
-    for (norm, tipo), grupo in grupos.items():
+    for norm, grupo in grupos.items():
         if len(grupo) > 1:
             # Ordena por ID (mantem o menor)
             grupo_ordenado = sorted(grupo, key=lambda x: x[0])
             id_mantido = grupo_ordenado[0][0]
-            for ent_id, nome, tipo in grupo_ordenado[1:]:
+            for ent_id, nome in grupo_ordenado[1:]:
                 migration_map[ent_id] = id_mantido
 
     # CASCADE: Migrar dados antes de deletar
@@ -67,30 +67,41 @@ def cleanup_duplicate_interviewees(conn):
     }
 
     for id_deletado, id_mantido in migration_map.items():
-        # 1. Migrar transcrições (via arquivos)
-        cursor.execute("""
-            UPDATE stg_transcricoes SET id_arquivo = (
-                SELECT id FROM (SELECT id, id_entrevistado FROM stg_arquivos WHERE id_entrevistado = ? ORDER BY id LIMIT 1)
-            ) WHERE id_arquivo IN (SELECT id FROM stg_arquivos WHERE id_entrevistado = ?)
-        """, (id_mantido, id_deletado))
-        # Nota: Esta migração é complexa, por enquanto apenas deletamos
+        # 0. MERGE METADATA: Se o mantido tem campos nulos, pega do deletado
+        cursor.execute("SELECT cargo, diretoria, unidade_negocio, area, nivel, dt_entrevista FROM stg_entrevistados WHERE id = ?", (id_deletado,))
+        del_data = cursor.fetchone()
+        
+        cursor.execute("SELECT cargo, diretoria, unidade_negocio, area, nivel, dt_entrevista FROM stg_entrevistados WHERE id = ?", (id_mantido,))
+        keep_data = cursor.fetchone()
+        
+        if del_data and keep_data:
+            updates = []
+            vals = []
+            cols = ["cargo", "diretoria", "unidade_negocio", "area", "nivel", "dt_entrevista"]
+            for i, col in enumerate(cols):
+                # Se o atual é nulo e o deletado tem valor, migra o valor
+                if (not keep_data[i] or str(keep_data[i]).strip() in ("", "None", "0")) and (del_data[i] and str(del_data[i]).strip() not in ("", "None", "0")):
+                    updates.append(f"{col} = ?")
+                    vals.append(del_data[i])
+            
+            if updates:
+                vals.append(id_mantido)
+                cursor.execute(f"UPDATE stg_entrevistados SET {', '.join(updates)} WHERE id = ?", vals)
+
+        # 1. Migrar arquivos (stg_arquivos)
+        # Todos os arquivos que apontavam para o deletado agora apontam para o mantido
+        cursor.execute("UPDATE stg_arquivos SET id_entrevistado = ? WHERE id_entrevistado = ?", (id_mantido, id_deletado))
 
         # 2. Migrar insights
-        cursor.execute("""
-            UPDATE fato_insights SET id_entrevistado = ? WHERE id_entrevistado = ?
-        """, (id_mantido, id_deletado))
+        cursor.execute("UPDATE fato_insights SET id_entrevistado = ? WHERE id_entrevistado = ?", (id_mantido, id_deletado))
         stats["migrated_insights"] += cursor.rowcount
 
         # 3. Migrar relações
-        cursor.execute("""
-            UPDATE fato_relacoes SET id_entrevistado = ? WHERE id_entrevistado = ?
-        """, (id_mantido, id_deletado))
+        cursor.execute("UPDATE fato_relacoes SET id_entrevistado = ? WHERE id_entrevistado = ?", (id_mantido, id_deletado))
         stats["migrated_relacoes"] += cursor.rowcount
 
         # 4. Migrar sistemas_uso
-        cursor.execute("""
-            UPDATE fato_sistemas_uso SET id_entrevistado = ? WHERE id_entrevistado = ?
-        """, (id_mantido, id_deletado))
+        cursor.execute("UPDATE fato_sistemas_uso SET id_entrevistado = ? WHERE id_entrevistado = ?", (id_mantido, id_deletado))
         stats["migrated_fato_sistemas_uso"] += cursor.rowcount
 
         # 5. Só agora DELETA o entrevistado

@@ -19,73 +19,72 @@ from src.utils.text_normalizer import normalize_for_fuzzy
 def link_roles_to_interviewees():
     """
     Conecta entrevistados aos PDFs de cargo correspondentes.
-
-    Processo:
-    1. Busca todos os PDFs de cargos no banco
-    2. Busca entrevistados com cargo preenchido
-    3. Para cada entrevistado:
-       - Normaliza o cargo do Excel
-       - Tenta match exato ou fuzzy (difflib)
-       - Atualiza arquivo_cargo_pdf
+    Usa matching multidimensional (Cargo + Diretoria).
     """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 1. Busca PDFs de cargos oficiais
-    cursor.execute("SELECT titulo_cargo, arquivo_pdf FROM stg_cargos")
-    cargos_pdfs = cursor.fetchall()
+    # 1. Busca PDFs de cargos oficiais com metadados
+    cursor.execute("SELECT id, titulo_cargo, diretoria, arquivo_pdf FROM stg_cargos")
+    cargos_oficiais = cursor.fetchall()
 
-    # De/Para: "diretor capex" -> "capex_diretor_a_capex_corporativo.pdf"
-    pdf_lookup = {
-        normalize_for_fuzzy(r['titulo_cargo']): r['arquivo_pdf']
-        for r in cargos_pdfs
-    }
-    chaves_pdf = list(pdf_lookup.keys())
+    # De/Para lookup: "diretor capex corporativo" -> (id, arquivo_pdf)
+    role_lookup = {}
+    for r in cargos_oficiais:
+        # Criamos uma chave composta (Cargo + Diretoria) para máxima precisão
+        role_norm = normalize_for_fuzzy(r['titulo_cargo'])
+        diretoria_norm = normalize_for_fuzzy(r['diretoria'])
+        chave = f"{role_norm} {diretoria_norm}".strip()
+        role_lookup[chave] = (r['id'], r['arquivo_pdf'])
+    
+    chaves_cargos = list(role_lookup.keys())
 
-    # 2. Busca entrevistados com cargo preenchido
-    cursor.execute(
-        "SELECT id, cargo FROM stg_entrevistados WHERE cargo IS NOT NULL "
-        "AND cargo != 'Não Identificado (Arquivo Extra)'"
-    )
-    pessoas = cursor.fetchall()
+    # 2. Busca entrevistados
+    cursor.execute("SELECT id, cargo, diretoria FROM stg_entrevistados WHERE cargo IS NOT NULL")
+    entrevistados = cursor.fetchall()
 
     count = 0
     not_found = []
 
-    # 3. Match fuzzy
-    for p in pessoas:
-        cargo_excel = normalize_for_fuzzy(p['cargo'])
-
-        if "extra" in cargo_excel:
-            continue  # Pula arquivos órfãos
+    # 3. Match Multidimensional
+    for p in entrevistados:
+        # Prepara a query do Excel (NOME + DIRETORIA)
+        excel_cargo = normalize_for_fuzzy(p['cargo'])
+        excel_dir = normalize_for_fuzzy(p['diretoria'])
+        query = f"{excel_cargo} {excel_dir}".strip()
 
         # Tenta match exato primeiro
         match = None
-        if cargo_excel in pdf_lookup:
-            match = cargo_excel
+        if query in role_lookup:
+            match = query
         else:
-            # Fuzzy match (70% de similaridade)
-            matches = difflib.get_close_matches(cargo_excel, chaves_pdf, n=1, cutoff=0.7)
+            # Fuzzy match (65% de similaridade na chave composta)
+            matches = difflib.get_close_matches(query, chaves_cargos, n=1, cutoff=0.65)
             if matches:
                 match = matches[0]
+            else:
+                # Fallback: Tenta match apenas por cargo se diretoria falhar
+                role_only_matches = difflib.get_close_matches(excel_cargo, chaves_cargos, n=1, cutoff=0.75)
+                if role_only_matches:
+                    match = role_only_matches[0]
 
         if match:
-            pdf_filename = pdf_lookup[match]
+            rid, rpdf = role_lookup[match]
             cursor.execute(
-                "UPDATE stg_entrevistados SET arquivo_cargo_pdf = ? WHERE id = ?",
-                (pdf_filename, p['id'])
+                "UPDATE stg_entrevistados SET id_cargo = ?, arquivo_cargo_pdf = ? WHERE id = ?",
+                (rid, rpdf, p['id'])
             )
             count += 1
         else:
-            not_found.append(p['cargo'])
+            not_found.append(f"{p['cargo']} ({p['diretoria']})")
 
     conn.commit()
     conn.close()
 
-    print(f"[LINKER] {count} entrevistados vinculados aos PDFs de cargo.")
+    print(f"[LINKER] {count} entrevistados vinculados a cargos oficiais.")
     if not_found:
-        print(f"[AVISO] {len(not_found)} cargos não encontraram correspondência.")
+        print(f"[AVISO] {len(not_found)} entrevistados não encontrados nos PDFs de cargo.")
 
 
 def main():

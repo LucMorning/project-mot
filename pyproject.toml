@@ -41,6 +41,8 @@ analyze-staged = "src.workflows.analyze.staged:main"
 
 # Relatórios (Estágio 3)
 reports = "src.workflows.reports:main"
+reports-excel = "src.workflows.generate.excel_reports:main"
+reports-markdown = "src.workflows.generate.markdown_reports:main"
 generate-markdown = "src.workflows.generate.markdown_reports:main"
 
 [build-system]

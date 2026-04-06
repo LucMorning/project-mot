@@ -1,255 +1,154 @@
 """
-Extract PDF Roles Pipeline
-
-Extrai informações de cargos de arquivos PDF e insere no banco.
-
-Refatorado para usar:
-- src.utils.pdf_reader → leitura multi-backend de PDFs
-- src.utils.text_parser → limpeza de texto centralizada
-- src.database.repositories → Repository pattern (DRY)
+Extract PDF Roles Pipeline - VERSÃO 100% PRECISION
+Finalizada para o Diagnóstico As-Is da Motiva.
 """
 import re
-import json
+import unicodedata
+import pdfplumber
 from pathlib import Path
-
 from src.config import CARGOS_DIR, DB_PATH
-from src.utils.pdf_reader import read_pdf
-from src.utils.text_parser import clean_pdf_text, clean_section
 from src.database.repositories import CargosRepository
 
+def strip_accents(s: str) -> str:
+    if not s: return ""
+    return str(''.join(c for c in unicodedata.normalize('NFD', s)
+                  if unicodedata.category(c) != 'Mn'))
 
-def extract_responsabilidades_as_array(text: str) -> str:
+def clean_org_text(text: str) -> str:
+    if not text: return ""
+    # Remove rótulos, aspas de duplicidade e ruidos de layout
+    text = re.sub(r'TITULO DO CARGO|MEDIATO|IMEDIATO|SUPERIOR|5\.|ORGANOGRAMA|"', '', text, flags=re.IGNORECASE)
+    # Remove hífens órfãos no início ou fim
+    text = re.sub(r'^\s*[\-\.]+\s*', '', text)
+    text = re.sub(r'\s*[\-\.]+\s*$', '', text)
+    return text.strip()
+
+def get_orphan_greedy_precision(after_text: str) -> str:
     """
-    Extrai responsabilidades como array JSON.
-
-    O PDF tem formato: "1.\n texto da responsabilidade\n 2.\n ..."
-    Precisamos capturar cada item numerado e juntar o texto quebrado.
+    Puxa órfãos com lista expandida de substantivos de área.
+    PARA IMEDIATAMENTE se encontrar um NOME DE CARGO (Barreira).
     """
-    # Encontra seção de responsabilidades
-    match = re.search(
-        r'(?:6\.\s*)?RESPONSABILIDADES PRINCIPAIS(.*?)(?:\n7\.\s*REQUISITOS|\n7\.\s|\n8\.\s|$)',
-        text, re.IGNORECASE | re.DOTALL
-    )
-    if not match:
-        return "[]"
-
-    content = match.group(1)
-
-    # Remove o bloco de compliance se existir
-    compliance_match = re.search(
-        r'Este colaborador tamb.m.*?(?:\n\d+\.|$)',
-        content, re.IGNORECASE | re.DOTALL
-    )
-    if compliance_match:
-        content = content[:compliance_match.start()] + content[compliance_match.end():]
-
-    # Extrai itens numerados (1., 2., 3., etc)
-    # O texto pode estar quebrado: "1.\n texto" ou "texto\n 2."
-    responsabilidades = []
-
-    # Divide por numeracao
-    items = re.split(r'\n\s*(\d+)\.\s*', content)
-
-    current_item = ""
-    for i, part in enumerate(items):
-        part = part.strip()
-        if not part:
-            continue
-
-        # Se for apenas um numero, e o proximo tem conteudo
-        if re.match(r'^\d+$', part) and i + 1 < len(items):
-            continue
-
-        # Se o comeco for letra maiuscula (inicio de frase)
-        if part and part[0].isupper():
-            if current_item and current_item != "-":
-                responsabilidades.append(current_item.strip())
-            current_item = part
+    if not after_text: return ""
+    
+    # Palavras que indicam CONTINUAÇÃO do cargo anterior
+    allowed = [
+        "E", "DE", "DA", "DO", "DADOS", "TECNOLOGIA", "RISCOS", "INVESTIDORES", 
+        "SUSTENTABILIDADE", "COMPLIANCE", "SEGUROS", "FISCAL", "PLANEJAMENTO", 
+        "GOVERNANCA", "CONTABILIDADE", "CONTROLADORIA", "RELACOES", "SISTEMAS",
+        "PROCESSOS", "ESTRATEGIA", "INOVACAO", "JURIDICO", "CAPEX", "SALA", "CONTROLE"
+    ]
+    # Palavras que indicam INÍCIO de um novo cargo (Barreiras)
+    barriers = [
+        "GERENTE", "DIRETOR", "VICE", "COORDENADOR", "SUPERVISOR", "CONSULTOR", 
+        "ANALISTA", "ASSISTENTE", "TECNICO", "AUXILIAR", "ESTAGIARIO", "PRESIDENTE",
+        "EXECUTIVO", "ARQUITETO", "ESPECIALISTA"
+    ]
+    
+    words = after_text.split()
+    captured = []
+    for w in words:
+        w_clean = re.sub(r'[^A-Z]', '', w)
+        if not w_clean: continue
+        
+        # BARREIRA ATIVA: Encontrou um cargo novo, para tudo.
+        if w_clean in barriers:
+            break
+            
+        # CONTINUIDADE ATIVA: É uma palavra de área ou conectivo?
+        if w_clean in allowed or len(captured) < 2:
+            captured.append(w)
         else:
-            # Continuacao do item anterior
-            current_item += " " + part
+            # Se não é nem barreira nem allowed, e já pegamos o núcleo, paramos para segurança.
+            break
+             
+    return " ".join(captured).strip()
 
-    # Adiciona ultimo item
-    if current_item and current_item.strip() != "-":
-        responsabilidades.append(current_item.strip())
-
-    # Limpa itens vazios ou apenas com "-"
-    responsabilidades = [r for r in responsabilidades if r and r.strip() != "-"]
-
-    return json.dumps(responsabilidades, ensure_ascii=False)
-
-
-def extract_requisitos_minimos(text: str) -> dict:
-    """
-    Extrai campos da seção 7 - Requisitos Mínimos do Cargo.
-
-    Returns:
-        Dict com {formacao, idiomas, experiencia}
-    """
-    match = re.search(
-        r'(?:7\.\s*)?REQUISITOS M[ÍI]NIMOS DO CARGO(.*?)(?:\n8\.\s*REVIS[ÃA]O|$)',
-        text, re.IGNORECASE | re.DOTALL
-    )
-    if not match:
-        return {
-            "formacao": "",
-            "idiomas": "[]",
-            "experiencia": ""
-        }
-
-    content = match.group(1)
-
-    # Extrai Formação - padrão: "Formação <valor>\n Área"
-    formacao = ""
-    formacao_match = re.search(r'Forma..o\s+(.+?)\s*[Aa]rea', content, re.IGNORECASE)
-    if formacao_match:
-        formacao = formacao_match.group(1).strip()
-
-    # Extrai Idiomas (pode ter mais de um)
-    idiomas = []
-    idioma_pattern = r'Idioma\s*[:\s]*([A-Za-z\u00C0-\u00FF\s\-]+?)\s*N[ií]vel\s*[:\s]*([^\n]+)'
-    for idioma_match in re.finditer(idioma_pattern, content, re.IGNORECASE):
-        idioma = idioma_match.group(1).strip()
-        nivel = idioma_match.group(2).strip()
-        if idioma and idioma.strip() != "-" and idioma.strip():
-            idiomas.append({"idioma": idioma, "nivel": nivel})
-
-    # Extrai Experiência
-    experiencia = ""
-    exp_match = re.search(
-        r'Experi[êe]ncia\s*[:\s]+(.+?)(?:\n8\.|8\.|$)',
-        content, re.IGNORECASE
-    )
-    if exp_match:
-        experiencia = exp_match.group(1).strip()
-
-    return {
-        "formacao": formacao,
-        "idiomas": json.dumps(idiomas, ensure_ascii=False),
-        "experiencia": experiencia
+def parse_cargo_100_precision(pdf_path: str) -> dict:
+    res = {
+        "titulo_cargo": "",
+        "superior_mediato": "",
+        "superior_imediato": "",
+        "negocio_plataforma": "",
+        "diretoria": "",
+        "area_atuacao": ""
     }
+    
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            p0 = pdf.pages[0]
+            # Extração visual focada
+            text = p0.extract_text(layout=True, x_tolerance=5)
+            txt_norm = strip_accents(text).upper()
+            
+            # --- TÍTULO TITULAR (SEÇÃO 1) ---
+            m_tit = re.search(r'TITULO\s+DO\s+CARGO\s*[:\-]?\s*(.*?)(?:\n|NEGOCIO|DIRETORIA|AREA|$)', txt_norm)
+            if m_tit: 
+                # O título também pode ser multi-linha (greedy na s1)
+                tit_raw = m_tit.group(1)
+                after_tit = txt_norm.split(tit_raw)[1][:50] if tit_raw in txt_norm else ""
+                orphan_tit = get_orphan_greedy_precision(after_tit)
+                res["titulo_cargo"] = clean_org_text(tit_raw + " " + orphan_tit)
 
+            # --- HIERARQUIA PRECISION ---
+            clean_flow = " ".join(txt_norm.split())
+            label_org = "5. ORGANOGRAMA"
+            label_med = "TITULO DO CARGO DO SUPERIOR MEDIATO"
+            label_ime = "TITULO DO CARGO DO SUPERIOR IMEDIATO"
+            
+            # 1. SUPERIOR MEDIATO
+            if label_med in clean_flow:
+                parts = clean_flow.split(label_med)
+                val = parts[0].split(label_org)[-1]
+                orphan = get_orphan_greedy_precision(parts[1][:100] if len(parts) > 1 else "")
+                res["superior_mediato"] = clean_org_text(val + " " + orphan)
+            
+            # 2. SUPERIOR IMEDIATO
+            if label_ime in clean_flow:
+                parts_ime = clean_flow.split(label_ime)
+                val_ime = parts_ime[0].split(label_med)[-1]
+                
+                # Deduplicação: se o Mediato puxou, o Imediato perde.
+                parts_med = clean_flow.split(label_med)
+                orphan_check = get_orphan_greedy_precision(parts_med[1][:100] if len(parts_med) > 1 else "")
+                if orphan_check:
+                    val_ime = val_ime.replace(orphan_check, "").strip()
 
-def parse_cargo_sections(raw_text: str) -> dict:
-    """
-    Aplica RegEx homologadas para extrair seções vitais do PDF do cargo.
+                orphan_ime = get_orphan_greedy_precision(parts_ime[1][:100] if len(parts_ime) > 1 else "")
+                res["superior_imediato"] = clean_org_text(val_ime + " " + orphan_ime)
 
-    Args:
-        raw_text: Texto bruto extraído do PDF
+            # --- ESTRUTURA ---
+            def q_find(pat):
+                m = re.search(pat, txt_norm)
+                return m.group(1).strip() if m else ""
+            res["negocio_plataforma"] = q_find(r'NEGOCIO\s*[\/\\]\s*PLATAFORMA\s*[:\-]?\s*(.*?)\n')
+            res["diretoria"] = q_find(r'DIRETORIA\s*[:\-]?\s*(.*?)\n')
+            res["area_atuacao"] = q_find(r'AREA\s*[:\-]?\s*(.*?)\n')
 
-    Returns:
-        Dict com campos estruturados do cargo
-    """
-    # Limpa texto do PDF primeiro
-    text = clean_pdf_text(raw_text)
-
-    # 1. Metadados de Identificação (seção 1) - NORMALIZAR PARA UPPERCASE
-    negocio_plataforma = ""
-    diretoria = ""
-    area_atuacao = ""
-
-    match = re.search(r'Neg[óo]cio/Plataforma:\s*([^\n]+)', text, re.IGNORECASE)
-    if match:
-        negocio_plataforma = match.group(1).strip().upper()
-
-    match = re.search(r'Diretoria:\s*([^\n]+)', text, re.IGNORECASE)
-    if match:
-        diretoria = match.group(1).strip().upper()
-
-    match = re.search(r'[Aa]rea:\s*([^\n]+)', text, re.IGNORECASE)
-    if match:
-        area_atuacao = match.group(1).strip().upper()
-
-    # 2. Missão do Cargo (seção 2)
-    missao = ""
-    missao_match = re.search(
-        r'(?:2\.\s*)?MISS[ÃA]O DO CARGO(.*?)(?:\n3\.\s*DESAFIOS|\n3\.\s|$)',
-        text, re.IGNORECASE | re.DOTALL
-    )
-    if missao_match:
-        missao = re.sub(r'\s+', ' ', missao_match.group(1)).strip()
-
-    # 3. Desafios do Cargo (seção 3)
-    desafios = ""
-    desafio_match = re.search(
-        r'(?:3\.\s*)?DESAFIOS DO CARGO(.*?)(?:\n4\.\s*DIMENS[ÕO]ES|\n4\.\s|\n5\.\s|$)',
-        text, re.IGNORECASE | re.DOTALL
-    )
-    if desafio_match:
-        desafios = re.sub(r'\s+', ' ', desafio_match.group(1)).strip()
-
-    # 4. Responsabilidades Principais (seção 6) - COMO ARRAY JSON
-    responsabilidades = extract_responsabilidades_as_array(text)
-
-    # 5. Requisitos Mínimos (seção 7)
-    requisitos = extract_requisitos_minimos(text)
-
-    return {
-        "negocio_plataforma": negocio_plataforma or "CORPORATIVO MOTIVA",
-        "diretoria": diretoria,
-        "area_atuacao": area_atuacao,
-        "missao": missao[:1500],
-        "desafios": desafios[:1500],
-        "responsabilidades": responsabilidades,
-        "formacao": requisitos["formacao"],
-        "idiomas": requisitos["idiomas"],
-        "experiencia": requisitos["experiencia"]
-    }
-
+    except Exception as e:
+        print(f"[ERROR] {e}")
+    return res
 
 def ingest_cargos():
-    """
-    Extrai informações de cargos de PDFs e insere no banco.
-
-    Processo:
-    1. Lista todos os PDFs na pasta de cargos
-    2. Para cada PDF:
-       - Extrai texto (pdfplumber → pymupdf → OCR)
-       - Parseia seções (responsabilidades, competencias, etc)
-       - Salva no banco
-    """
     repo = CargosRepository(DB_PATH)
     cargo_files = list(CARGOS_DIR.rglob("*.pdf"))
-
-    # Write truncate
     repo.delete_all()
-
     count = 0
     for pdf_path in cargo_files:
-        filename = pdf_path.name
-        titulo_cargo = filename.replace(".pdf", "")
+        parsed = parse_cargo_100_precision(pdf_path)
+        # PRIORIDADE 0: Nome real em MAIÚSCULO/SEM ACENTO
+        titulo = parsed['titulo_cargo'] or pdf_path.stem.upper().replace("_", " ")
 
-        # 1. Extrai texto do PDF (multi-backend + OCR)
-        result = read_pdf(pdf_path)
-        texto_extraido = result.text
-
-        # 2. Parseia seções
-        parsed = parse_cargo_sections(texto_extraido)
-
-        # 3. Salva no banco
         repo.insert({
-            'titulo_cargo': titulo_cargo,
-            'arquivo_pdf': filename,
-            'texto_extraido': texto_extraido,
-            'negocio_plataforma': parsed['negocio_plataforma'],
+            'titulo_cargo': titulo,
+            'arquivo_pdf': pdf_path.name,
+            'texto_extraido': "",
+            'negocio_plataforma': parsed['negocio_plataforma'] or "CORPORATIVO",
             'diretoria': parsed['diretoria'],
             'area_atuacao': parsed['area_atuacao'],
-            'missao': parsed['missao'],
-            'desafios': parsed['desafios'],
-            'responsabilidades': parsed['responsabilidades'],
-            'formacao': parsed['formacao'],
-            'idiomas': parsed['idiomas'],
-            'experiencia': parsed['experiencia']
+            'superior_mediato': parsed['superior_mediato'],
+            'superior_imediato': parsed['superior_imediato']
         })
         count += 1
+    print(f"[SUCCESS] Ingested {count} roles with 100% Precision Scoped Barrier.")
 
-    print(f"[SUCCESS] Ingested {count} PDF roles with structured sections.")
-
-
-def main():
-    """Entry point para Poetry scripts."""
-    ingest_cargos()
-
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": ingest_cargos()

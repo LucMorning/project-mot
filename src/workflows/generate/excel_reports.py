@@ -58,8 +58,8 @@ def apply_header_style(ws, cell_range):
             cell.border = thin_border
 
 
-def apply_data_style(ws, start_row, end_row=None):
-    """Aplica estilo aos dados."""
+def apply_data_style(ws, start_row, end_row=None, min_col=1, max_col=None):
+    """Aplica estilo aos dados apenas no range especificado."""
     thin_border = Border(
         left=Side(style='thin'),
         right=Side(style='thin'),
@@ -67,9 +67,11 @@ def apply_data_style(ws, start_row, end_row=None):
         bottom=Side(style='thin')
     )
 
-    for row in ws.iter_rows(min_row=start_row, max_row=end_row):
+    actual_max_col = max_col if max_col else ws.max_column
+
+    for row in ws.iter_rows(min_row=start_row, max_row=end_row, min_col=min_col, max_col=actual_max_col):
         for cell in row:
-            # Aplicar estilo mesmo se for zero ou vazio (borda sempre)
+            # Não aplicar se a célula é parte de um merge mas não é a principal (opcional, dependendo do openpyxl)
             cell.font = Font(name='Calibri', size=10)
             cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
             cell.border = thin_border
@@ -271,15 +273,9 @@ def generate_excel_report(output_path: str = None) -> str:
     conn = sqlite3.connect(DB_PATH)
 
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-        # 1. DASHBOARD
-        print("  [EXCEL] DASHBOARD...")
-        df_metricas, df_area = get_dashboard_data(conn)
-        df_metricas.to_excel(writer, sheet_name='DASHBOARD', startrow=1, startcol=0, index=False)
-
-        # 2. MATRIZ DORES (UMA LINHA POR ETAPA, TABELAS POR DOR LADO A LADO)
+        # 1. MATRIZ DORES (UMA LINHA POR ETAPA, TABELAS POR DOR LADO A LADO)
         print("  [EXCEL] MATRIZ DORES...")
-        
-        # 2.1 LEGENDA NO TOPO (A3 a B10)
+        df_metricas_dummy, df_area = get_dashboard_data(conn)
         df_legenda = pd.DataFrame([
             {"Tipo": k, "Descrição": v} for k, v in PAIN_POINTS_LEGEND.items()
         ])
@@ -333,8 +329,7 @@ def generate_excel_report(output_path: str = None) -> str:
                 start_col += 4
             start_row += max_rows_in_this_etapa + 3
 
-        # 3. SHEETS ADICIONAIS
-        df_legenda.to_excel(writer, sheet_name='LEGENDA', startrow=1, startcol=0, index=False)
+        # 2. SHEETS ADICIONAIS
         print("  [EXCEL] MAPA POR ÁREA...")
         df_area.to_excel(writer, sheet_name='MAPA_AREA', startrow=1, index=False)
 
@@ -364,20 +359,42 @@ def generate_excel_report(output_path: str = None) -> str:
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         title_text = f"MOTIVA - {sheet_name.replace('_', ' ').upper()}"
-        if sheet_name == 'DASHBOARD': title_text = 'MOTIVA - DASHBOARD EXECUTIVO'
 
         # Estilo do Titulo (Coluna B em diante se tiver logo, ou A se não tiver)
         title_cell_start = 'A1'
         
-        # Tentar inserir Logo (NECESSÁRIO assets/motiva.png)
+        # Tentar inserir Logo (CÁLCULO PRECISO DE CENTRALIZAÇÃO VIA EMU)
         logo_path = PROJECT_ROOT / "assets" / "motiva.png"
         if logo_path.exists():
+            from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+            from openpyxl.drawing.xdr import XDRPositiveSize2D
+            from openpyxl.utils.units import pixels_to_EMU
+            
             try:
                 img = Image(str(logo_path))
-                img.height = 35 
-                img.width = 110
-                ws.add_image(img, 'A1')
-                ws.row_dimensions[1].height = 40
+                # Manter proporção original
+                ratio = img.width / img.height if img.height else 1
+                target_h_px = 30
+                target_w_px = target_h_px * ratio
+                
+                # Dimensões da célula A1 em pixels (aproximadas para CALIBRI 11)
+                # Unidades Excel: Width (chars) ~ 7px, Height (points) ~ 1.33px
+                cell_w_px = 22 * 7.5
+                cell_h_px = 45 * 1.33
+                
+                # Cálculo de Offsets em Pixels -> EMUs (1px = 9525 EMUs)
+                off_x_emu = pixels_to_EMU(max(0, (cell_w_px - target_w_px) // 2))
+                off_y_emu = pixels_to_EMU(max(0, (cell_h_px - target_h_px) // 2))
+                
+                # Criar Anchor com Offsets de centralização
+                marker = AnchorMarker(col=0, colOff=off_x_emu, row=0, rowOff=off_y_emu)
+                size = XDRPositiveSize2D(pixels_to_EMU(target_w_px), pixels_to_EMU(target_h_px))
+                img.anchor = OneCellAnchor(_from=marker, ext=size)
+                
+                ws.column_dimensions['A'].width = 22
+                ws.row_dimensions[1].height = 45
+                
+                ws.add_image(img)
                 title_cell_start = 'B1' # Desloca titulo
             except:
                 pass
@@ -386,9 +403,10 @@ def generate_excel_report(output_path: str = None) -> str:
         ws[title_cell_start].font = Font(name='Calibri', size=16, bold=True, color='5E45E8')
         ws[title_cell_start].alignment = Alignment(horizontal='center', vertical='center')
 
-        if sheet_name != 'MATRIZ_DORES':
-            last_col = get_column_letter(ws.max_column)
-            ws.merge_cells(f'{title_cell_start}:{last_col}1')
+        # Mesclar título (sempre até uma largura razoável)
+        last_col_idx = max(ws.max_column, 15)
+        if last_col_idx > (1 if title_cell_start == 'A1' else 2):
+            ws.merge_cells(f'{title_cell_start}:{get_column_letter(last_col_idx)}1')
 
         header_row = 2
         data_row = 3
@@ -397,16 +415,34 @@ def generate_excel_report(output_path: str = None) -> str:
                 # AJUSTE DE COLUNAS GERAL (Compacto)
                 ws.column_dimensions['A'].width = 25
                 ws.column_dimensions['B'].width = 10
+                # Gaps estreitos e sem bordas
+                for col_idx in [4, 8, 12, 16, 20]:
+                    ws.column_dimensions[get_column_letter(col_idx)].width = 2
                 
                 # Formatação cirúrgica da Legenda (Linhas 3-11)
+                # Header Legenda
                 apply_header_style(ws, 'A3:B3')
-                ws.merge_cells('B3:O3') # Header descrição largo
-                apply_data_style(ws, 4, end_row=11)
-                
-                for r_idx in range(4, 12):
-                    if ws.cell(row=r_idx, column=1).value:
-                        ws.merge_cells(start_row=r_idx, start_column=2, end_row=r_idx, end_column=15)
-                        ws.cell(row=r_idx, column=2).alignment = Alignment(wrap_text=True, vertical='top')
+                # Pintar apenas B do merge para a borda aparecer? (Melhor borda manual)
+                for r_idx in range(3, 12):
+                    for c_idx in range(1, 16):
+                        cell = ws.cell(row=r_idx, column=c_idx)
+                        if c_idx == 1 or (c_idx >= 2 and c_idx <= 15):
+                            # Estilos manuais para evitar leak
+                            if r_idx == 3: # Header
+                                cell.fill = PatternFill(start_color='5E45E8', end_color='5E45E8', fill_type='solid')
+                                cell.font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
+                            else:
+                                cell.font = Font(name='Calibri', size=10)
+                            
+                            # Bordas apenas no contorno do merge e em A
+                            if c_idx == 1:
+                                cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                            elif c_idx == 2: # Início do merge
+                                cell.border = Border(left=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                            elif c_idx == 15: # Fim do merge
+                                cell.border = Border(right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                            elif c_idx > 2 and c_idx < 15:
+                                cell.border = Border(top=Side(style='thin'), bottom=Side(style='thin'))
 
                 # Formatação das Matrizes (Linha 12+)
                 for r in ws.iter_rows(min_row=12):
@@ -424,13 +460,15 @@ def generate_excel_report(output_path: str = None) -> str:
                                     above.font = Font(name='Calibri', size=11, bold=True)
                                     above.alignment = Alignment(horizontal='center')
                                     ws.merge_cells(start_row=row-1, start_column=col, end_row=row-1, end_column=col+2)
-                                    above.fill = PatternFill(start_color='E8EAF6', end_color='E8EAF6', fill_type='solid')
+                                    # Pintar header da dor
+                                    for c_i in range(col, col+3):
+                                        ws.cell(row=row-1, column=c_i).fill = PatternFill(start_color='E8EAF6', end_color='E8EAF6', fill_type='solid')
 
                             # Colunas compactas de métricas
                             if str(cell.value).lower() in ['ocorrencias', 'críticas']:
                                 ws.column_dimensions[get_column_letter(col)].width = 10
 
-                            # Dados ABAIXO
+                            # Dados ABAIXO (Apenas as 3 colunas)
                             data_r = row + 1
                             while ws.cell(row=data_r, column=col).value is not None:
                                 for c_idx in range(col, col + 3):
@@ -447,14 +485,11 @@ def generate_excel_report(output_path: str = None) -> str:
                         # Título da Etapa
                         if cell.value and cell.column == 1 and str(cell.value)[0].isdigit() and '. ' in str(cell.value):
                             cell.font = Font(name='Calibri', size=14, bold=True, color='5E45E8')
-                            # Merge cauteloso para não quebrar alinhamento (até col 20 costuma ser seguro)
+                            # Sem bordas aqui
+                            cell.border = Border()
+                            # Merge cauteloso (não aplica bordas extras)
                             ws.merge_cells(start_row=cell.row, start_column=1, end_row=cell.row, end_column=20)
 
-            elif sheet_name == 'LEGENDA':
-                ws.column_dimensions['A'].width = 25
-                ws.column_dimensions['B'].width = 100
-                apply_header_style(ws, f'A2:B2')
-                apply_data_style(ws, 3)
             else:
                 apply_header_style(ws, f'A{header_row}:{get_column_letter(ws.max_column)}{header_row}')
                 apply_data_style(ws, data_row)

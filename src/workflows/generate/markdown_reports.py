@@ -16,7 +16,7 @@ import sqlite3
 import google.generativeai as genai
 import dotenv
 
-from src.config import FICHAS_DIR, DB_PATH
+from src.config import FICHAS_DIR, DB_PATH, AI_MODEL
 from src.database.repositories import (
     InsightsRepository, SistemasUsoRepository, RelacoesRepository,
     EntrevistadosRepository
@@ -56,7 +56,7 @@ def generate_executive_summary(
     """
 
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel(AI_MODEL)
         response = model.generate_content(contexto)
         return response.text.strip()
     except Exception as e:
@@ -65,9 +65,9 @@ def generate_executive_summary(
 
 def get_emoji_severidade(severidade: str) -> str:
     """Retorna emoji baseado na severidade."""
-    if "Alta" in (severidade or ""):
+    if "Alta" in (severidade or "") or "Alto" in (severidade or ""):
         return "🟥"
-    elif "Media" in (severidade or ""):
+    elif "Media" in (severidade or "") or "Médio" in (severidade or ""):
         return "🟨"
     return "🟦"
 
@@ -212,7 +212,7 @@ def generate_all_markdowns(output_dir: Path = None) -> int:
     cursor.execute("""
         SELECT DISTINCT e.id, e.nome
         FROM stg_entrevistados e
-        JOIN insights_ia i ON e.id = i.id_entrevistado
+        JOIN fato_insights i ON e.id = i.id_entrevistado
         ORDER BY e.nome
     """)
     entrevistados_com_dados = cursor.fetchall()
