@@ -12,6 +12,8 @@ import re
 from typing import List, Dict
 from dataclasses import dataclass
 
+from src.config import CHUNK_MAX_SIZE, CHUNK_MIN_SIZE, CHUNK_OVERLAP_RATIO
+
 
 @dataclass
 class Chunk:
@@ -36,9 +38,9 @@ class TranscriptChunker:
 
     def __init__(
         self,
-        max_chunk_size: int = 15000,  # caracteres por chunk
-        overlap_ratio: float = 0.15,   # 15% de sobreposição
-        min_chunk_size: int = 5000     # tamanho mínimo
+        max_chunk_size: int = CHUNK_MAX_SIZE,
+        overlap_ratio: float = CHUNK_OVERLAP_RATIO,
+        min_chunk_size: int = CHUNK_MIN_SIZE
     ):
         self.max_chunk_size = max_chunk_size
         self.overlap_ratio = overlap_ratio
@@ -207,8 +209,8 @@ class TranscriptChunker:
 
 def chunk_transcript(
     transcript: str,
-    max_size: int = 15000,
-    overlap: float = 0.15
+    max_size: int = CHUNK_MAX_SIZE,
+    overlap: float = CHUNK_OVERLAP_RATIO
 ) -> List[Chunk]:
     """
     Divide uma transcrição em chunks com overlap.

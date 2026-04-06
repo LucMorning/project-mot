@@ -10,6 +10,8 @@ from typing import Dict, Any, Type
 
 from google import genai
 
+from src.config import AI_TEMPERATURE
+
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 
@@ -70,7 +72,7 @@ class GeminiProvider:
         """
         config: Dict[str, Any] = {
             'system_instruction': system_prompt,
-            'temperature': 0.1,
+            'temperature': AI_TEMPERATURE,
         }
 
         if schema is not None:

@@ -100,7 +100,7 @@ def generate_markdown_for_entrevistado(entrevistado_id: int, output_dir: Path = 
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, nome, cargo, area, diretoria, nivel, dt_entrevista 
-        FROM entrevistados 
+        FROM stg_entrevistados 
         WHERE id = ?
     """, (entrevistado_id,))
     row = cursor.fetchone()
@@ -211,7 +211,7 @@ def generate_all_markdowns(output_dir: Path = None) -> int:
 
     cursor.execute("""
         SELECT DISTINCT e.id, e.nome
-        FROM entrevistados e
+        FROM stg_entrevistados e
         JOIN insights_ia i ON e.id = i.id_entrevistado
         ORDER BY e.nome
     """)

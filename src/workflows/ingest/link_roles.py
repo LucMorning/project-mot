@@ -33,7 +33,7 @@ def link_roles_to_interviewees():
     cursor = conn.cursor()
 
     # 1. Busca PDFs de cargos oficiais
-    cursor.execute("SELECT titulo_cargo, arquivo_pdf FROM cargos")
+    cursor.execute("SELECT titulo_cargo, arquivo_pdf FROM stg_cargos")
     cargos_pdfs = cursor.fetchall()
 
     # De/Para: "diretor capex" -> "capex_diretor_a_capex_corporativo.pdf"
@@ -45,7 +45,7 @@ def link_roles_to_interviewees():
 
     # 2. Busca entrevistados com cargo preenchido
     cursor.execute(
-        "SELECT id, cargo FROM entrevistados WHERE cargo IS NOT NULL "
+        "SELECT id, cargo FROM stg_entrevistados WHERE cargo IS NOT NULL "
         "AND cargo != 'Não Identificado (Arquivo Extra)'"
     )
     pessoas = cursor.fetchall()
@@ -73,7 +73,7 @@ def link_roles_to_interviewees():
         if match:
             pdf_filename = pdf_lookup[match]
             cursor.execute(
-                "UPDATE entrevistados SET arquivo_cargo_pdf = ? WHERE id = ?",
+                "UPDATE stg_entrevistados SET arquivo_cargo_pdf = ? WHERE id = ?",
                 (pdf_filename, p['id'])
             )
             count += 1

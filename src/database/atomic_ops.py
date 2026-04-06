@@ -11,6 +11,8 @@ import hashlib
 from pathlib import Path
 from typing import Optional
 
+from src.config import IntervieweeStatus
+
 
 class AtomicWriter:
     """
@@ -57,7 +59,7 @@ class AtomicWriter:
             affected += cursor.rowcount
 
             # 3. Sistemas uso
-            cursor.execute("DELETE FROM sistemas_uso WHERE entrevistado_id = ?", (entrevistado_id,))
+            cursor.execute("DELETE FROM fato_sistemas_uso WHERE entrevistado_id = ?", (entrevistado_id,))
             affected += cursor.rowcount
 
             # 4. Insights IA (inclui Dores e Processos)
@@ -66,7 +68,7 @@ class AtomicWriter:
 
             # 5. Reseta status
             cursor.execute(
-                "UPDATE entrevistados SET status_revisao = 'pendente', data_revisao = NULL, notas_revisor = NULL WHERE id = ?",
+                f"UPDATE stg_entrevistados SET status_revisao = '{IntervieweeStatus.PENDING}', data_revisao = NULL, notas_revisor = NULL WHERE id = ?",
                 (entrevistado_id,)
             )
             affected += cursor.rowcount
@@ -84,7 +86,7 @@ class AtomicWriter:
         conn = self._get_conn()
         cursor = conn.cursor()
         try:
-            cursor.execute("DELETE FROM transcricoes WHERE entrevistado_id = ?", (entrevistado_id,))
+            cursor.execute("DELETE FROM stg_transcricoes WHERE entrevistado_id = ?", (entrevistado_id,))
             affected = cursor.rowcount
             conn.commit()
             return affected
@@ -107,7 +109,7 @@ class AtomicWriter:
         try:
             counts = {}
 
-            tables = ["cross_validation", "relacoes", "sistemas_uso", "insights_ia"]
+            tables = ["cross_validation", "relacoes", "fato_sistemas_uso", "insights_ia"]
 
             for table in tables:
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
@@ -117,7 +119,7 @@ class AtomicWriter:
 
             # Reseta status de todos
             cursor.execute(
-                "UPDATE entrevistados SET status_revisao = 'pendente', data_revisao = NULL, notas_revisor = NULL"
+                f"UPDATE stg_entrevistados SET status_revisao = '{IntervieweeStatus.PENDING}', data_revisao = NULL, notas_revisor = NULL"
             )
 
             conn.commit()
@@ -128,14 +130,14 @@ class AtomicWriter:
         finally:
             conn.close()
 
-    def truncate_transcricoes(self) -> int:
+    def truncate_stg_transcricoes(self) -> int:
         """Remove todas as transcrições."""
         conn = self._get_conn()
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT COUNT(*) FROM transcricoes")
+            cursor.execute("SELECT COUNT(*) FROM stg_transcricoes")
             before = cursor.fetchone()[0]
-            cursor.execute("DELETE FROM transcricoes")
+            cursor.execute("DELETE FROM stg_transcricoes")
             conn.commit()
             return before
         finally:
@@ -159,9 +161,9 @@ class AtomicWriter:
         conn = self._get_conn()
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT COUNT(*) FROM entrevistados")
+            cursor.execute("SELECT COUNT(*) FROM stg_entrevistados")
             before = cursor.fetchone()[0]
-            cursor.execute("DELETE FROM entrevistados")
+            cursor.execute("DELETE FROM stg_entrevistados")
             conn.commit()
             return before
         finally:

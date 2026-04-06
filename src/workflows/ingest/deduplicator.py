@@ -36,7 +36,7 @@ def cleanup_duplicate_interviewees(conn):
     # Busca todos com arquivo de transcricao
     cursor.execute("""
         SELECT id, nome, arquivo_transcricao
-        FROM entrevistados
+        FROM stg_entrevistados
         WHERE arquivo_transcricao IS NOT NULL
         ORDER BY nome
     """)
@@ -76,7 +76,7 @@ def cleanup_duplicate_interviewees(conn):
 
     # SEGUNDA ESTRATÉGIA: Primeiro nome igual + substring do nome completo
     # Para casos como "Lucas Giraldi" vs "Lucas Giraldi Rapchan Aguilar"
-    cursor.execute("SELECT id, nome, arquivo_transcricao FROM entrevistados ORDER BY nome")
+    cursor.execute("SELECT id, nome, arquivo_transcricao FROM stg_entrevistados ORDER BY nome")
     todos_nomes = cursor.fetchall()
 
     # Agrupa por primeiro nome
@@ -107,31 +107,42 @@ def cleanup_duplicate_interviewees(conn):
                     nome1_lower = nome1.lower()
                     nome2_lower = nome2.lower()
 
-                    # SÓ considera duplicata se:
-                    # 1. Nomes são similares E
-                    # 2. TEM O MESMO TIPO de entrevista (as_is vs aprofundamento)
-                    if norm1 == norm2 or (nome1_lower in nome2_lower or nome2_lower in nome1_lower):
-                        # Verifica se tem o mesmo tipo de entrevista
-                        tipo1 = "aprofundamento" if "aprofundamento" in (arq1 or "").lower() else "as_is"
-                        tipo2 = "aprofundamento" if "aprofundamento" in (arq2 or "").lower() else "as_is"
+                    # Verifica tipo de entrevista
+                    tipo1 = "aprofundamento" if "aprofundamento" in (arq1 or "").lower() else "as_is"
+                    tipo2 = "aprofundamento" if "aprofundamento" in (arq2 or "").lower() else "as_is"
 
-                        # SÓ remove se for o MESMO tipo
+                    # Se nomes normalizados são EXATAMENTE IGUAIS → mesma pessoa
+                    # Se são apenas substrings → só mescla se for o MESMO tipo
+                    if norm1 == norm2:
+                        # Mesma pessoa - SÓ mescla se for o MESMO tipo
+                        # (as_is e aprofundamento da mesma pessoa devem ser mantidos separados)
+                        if tipo1 == tipo2:
+                            # Mesmo tipo - pode mesclar
+                            if ent_id1 < ent_id2:
+                                menor, maior = ent_id1, ent_id2
+                            else:
+                                menor, maior = ent_id2, ent_id1
+                            print(f"  [CLEANUP] Mesclando {norm1} (ID {maior} -> {menor})")
+                            para_remover.add(maior)
+                        else:
+                            # Tipos diferentes - mantém separado
+                            pass
+                    elif nome1_lower in nome2_lower or nome2_lower in nome1_lower:
+                        # Substring - só mescla se for o MESMO tipo
                         if tipo1 == tipo2:
                             if ent_id1 < ent_id2:
-                                para_remover.add(ent_id2)
+                                menor, maior = ent_id1, ent_id2
                             else:
-                                para_remover.add(ent_id1)
+                                menor, maior = ent_id2, ent_id1
+                            para_remover.add(maior)
 
     # Mapeamento: {id_deletado: id_mantido}
     migration_map = {}
 
     # Converte para dicionário (primeira estratégia)
-    for nome_arquivo, grupo in grupos.items():
+    for (nome_arquivo, tipo), grupo in grupos.items():
         if len(grupo) > 1:
-            grupo_ordenado = sorted(grupo, key=lambda x: (
-                "as_is" in (x[2] or ""),
-                x[0]
-            ))
+            grupo_ordenado = sorted(grupo, key=lambda x: x[0])
             id_mantido = grupo_ordenado[0][0]
             for ent_id, nome, arquivo in grupo_ordenado[1:]:
                 migration_map[ent_id] = id_mantido
@@ -153,67 +164,76 @@ def cleanup_duplicate_interviewees(conn):
                     nome1_lower = nome1.lower()
                     nome2_lower = nome2.lower()
 
-                    if norm1 == norm2 or (nome1_lower in nome2_lower or nome2_lower in nome1_lower):
-                        if "as_is" in (arq2 or ""):
-                            migration_map[ent_id2] = ent_id1
-                        elif "as_is" in (arq1 or ""):
-                            migration_map[ent_id1] = ent_id2
-                        elif ent_id1 < ent_id2:
-                            migration_map[ent_id2] = ent_id1
-                        else:
-                            migration_map[ent_id1] = ent_id2
+                    # Se nomes normalizados são EXATAMENTE IGUAIS → mesma pessoa
+                    # Se são apenas substrings → só mescla se for o MESMO tipo
+                    if norm1 == norm2:
+                        # Mesma pessoa - SÓ mescla se for o MESMO tipo
+                        if tipo1 == tipo2:
+                            # Mesmo tipo - pode mesclar
+                            if ent_id1 < ent_id2:
+                                migration_map[ent_id2] = ent_id1
+                            else:
+                                migration_map[ent_id1] = ent_id2
+                        # else: tipos diferentes - mantém separado (não adiciona ao map)
+                    elif nome1_lower in nome2_lower or nome2_lower in nome1_lower:
+                        # Substring - só mescla se for o MESMO tipo
+                        if tipo1 == tipo2:
+                            if ent_id1 < ent_id2:
+                                migration_map[ent_id2] = ent_id1
+                            else:
+                                migration_map[ent_id1] = ent_id2
 
     # ─────────────────────────────────────────────────────────────
     # CASCADE: Migrar dados antes de deletar
     # ─────────────────────────────────────────────────────────────
     stats = {
         "removed": 0,
-        "migrated_transcricoes": 0,
+        "migrated_stg_transcricoes": 0,
         "migrated_insights": 0,
         "migrated_relacoes": 0,
-        "migrated_sistemas_uso": 0
+        "migrated_fato_sistemas_uso": 0
     }
 
     for id_deletado, id_mantido in migration_map.items():
         # 1. Migrar transcrições
         cursor.execute("""
-            UPDATE transcricoes SET id_entrevistado = ? WHERE id_entrevistado = ?
+            UPDATE stg_stg_transcricoes SET id_entrevistado = ? WHERE id_entrevistado = ?
         """, (id_mantido, id_deletado))
-        stats["migrated_transcricoes"] += cursor.rowcount
+        stats["migrated_stg_transcricoes"] += cursor.rowcount
 
         # 2. Migrar insights
         cursor.execute("""
-            UPDATE insights_ia SET id_entrevistado = ? WHERE id_entrevistado = ?
+            UPDATE fato_insights SET id_entrevistado = ? WHERE id_entrevistado = ?
         """, (id_mantido, id_deletado))
         stats["migrated_insights"] += cursor.rowcount
 
         # 3. Migrar relações
         cursor.execute("""
-            UPDATE relacoes SET id_entrevistado = ? WHERE id_entrevistado = ?
+            UPDATE fato_relacoes SET id_entrevistado = ? WHERE id_entrevistado = ?
         """, (id_mantido, id_deletado))
         stats["migrated_relacoes"] += cursor.rowcount
 
-        # 4. Migrar sistemas_uso
+        # 4. Migrar fato_sistemas_uso
         cursor.execute("""
-            UPDATE sistemas_uso SET id_entrevistado = ? WHERE id_entrevistado = ?
+            UPDATE fato_sistemas_uso SET id_entrevistado = ? WHERE id_entrevistado = ?
         """, (id_mantido, id_deletado))
-        stats["migrated_sistemas_uso"] += cursor.rowcount
+        stats["migrated_fato_sistemas_uso"] += cursor.rowcount
 
         # 5. Só agora DELETA o entrevistado
-        cursor.execute("DELETE FROM entrevistados WHERE id = ?", (id_deletado,))
+        cursor.execute("DELETE FROM stg_entrevistados WHERE id = ?", (id_deletado,))
         stats["removed"] += 1
 
     # Log de migração
     if stats["removed"] > 0:
         print(f"  [CASCADE] {stats['removed']} duplicatas removidas:")
-        if stats["migrated_transcricoes"] > 0:
-            print(f"    - {stats['migrated_transcricoes']} transcrições migradas")
+        if stats["migrated_stg_transcricoes"] > 0:
+            print(f"    - {stats['migrated_stg_transcricoes']} transcrições migradas")
         if stats["migrated_insights"] > 0:
             print(f"    - {stats['migrated_insights']} insights migrados")
         if stats["migrated_relacoes"] > 0:
             print(f"    - {stats['migrated_relacoes']} relações migradas")
-        if stats["migrated_sistemas_uso"] > 0:
-            print(f"    - {stats['migrated_sistemas_uso']} sistemas_uso migrados")
+        if stats["migrated_fato_sistemas_uso"] > 0:
+            print(f"    - {stats['migrated_fato_sistemas_uso']} fato_sistemas_uso migrados")
 
     return stats
 
@@ -232,7 +252,7 @@ def find_existing_interviewee(conn, nome: str) -> int:
     cursor = conn.cursor()
 
     # Busca todos os entrevistados
-    cursor.execute("SELECT id, nome FROM entrevistados")
+    cursor.execute("SELECT id, nome FROM stg_entrevistados")
     todos = cursor.fetchall()
 
     nome_normalizado = normalize_interviewee_name(nome)
@@ -250,18 +270,11 @@ def find_existing_interviewee(conn, nome: str) -> int:
         if nome_normalizado == ent_nome_norm:
             return ent_id
 
-        # Match por substring - MAIS ESTRITO para evitar falsos positivos
-        # SÓ da match se:
-        # 1. Um for substring do outro E
-        # 2. Primeiro nome igual E
-        # 3. Diferença de tamanho < 30% (para evitar "Lucas Aguilar" vs "Lucas Giraldi Rapchan Aguilar")
+        # Match por substring do NOME COMPLETO (não normalizado)
+        # Para casos como "Lucas Giraldi" vs "Lucas Giraldi Rapchan Aguilar"
         if nome_lower in ent_nome_lower or ent_nome_lower in nome_lower:
+            # Verifica se o primeiro nome é o mesmo
             if primeiro_nome == ent_primeiro_nome:
-                # Verifica diferença de tamanho
-                len_nome = len(nome_lower)
-                len_ent = len(ent_nome_lower)
-                diff = abs(len_nome - len_ent) / max(len_nome, len_ent)
-                if diff < 0.3:  # Menos de 30% de diferença
-                    return ent_id
+                return ent_id
 
     return None

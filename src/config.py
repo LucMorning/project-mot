@@ -31,15 +31,48 @@ TRANSCRIPT_PREFIXES   = ["entrevista_as_is_", "aprofundamento_"]
 TRANSCRIPT_EXTENSION  = ".docx"
 
 # ── API / IA ───────────────────────────────────────────────────────────
-AI_PROVIDER = "gemini"  # "openai" | "gemini" | "anthropic" | "ollama"
-AI_MODEL    = "gemini-2.0-flash"  # Modelos disponíveis: gemini-2.0-flash, gemini-2.5-flash
+AI_PROVIDER    = "gemini"  # "openai" | "gemini" | "anthropic" | "ollama"
+AI_MODEL       = "gemini-2.0-flash"  # Modelos disponíveis: gemini-2.0-flash, gemini-2.5-flash
 AI_API_KEY_ENV = "GEMINI_API_KEY"
 AI_MAX_RETRIES = 3
-AI_RETRY_DELAY = 5  # segundos
+AI_RETRY_DELAY = 5         # segundos entre retries
+AI_TEMPERATURE = 0.1       # temperatura para geração estruturada (JSON mode)
+AI_AGENT_SLEEP = 2         # segundos entre chamadas de agente (rate limit intra-chunk)
 
 # Pipeline Multi-Etapas
-BATCH_SIZE = 3  # Número de entrevistados processados em paralelo
+BATCH_SIZE             = 3   # Número de entrevistados processados em paralelo
 CONTEXT_INSIGHTS_LIMIT = 15  # Número de insights anteriores usados como contexto
+
+# ── CHUNKING ────────────────────────────────────────────────────────────
+CHUNK_MAX_SIZE     = 15000  # Caracteres por chunk (≈ 3k tokens Gemini Flash)
+CHUNK_MIN_SIZE     = 5000   # Tamanho mínimo para um chunk ser persistido
+CHUNK_OVERLAP_RATIO = 0.15  # Fração de overlap entre chunks consecutivos
+
+# ── STATUS STRINGS (Single Source of Truth) ─────────────────────────────
+class ChunkStatus:
+    """Status de análise de um chunk de transcrição (tabela transcricao_chunks)."""
+    PENDING = 'pendente'
+    DONE    = 'concluido'
+    ERROR   = 'erro'
+
+class IntervieweeStatus:
+    """Status de revisão de um entrevistado (tabela entrevistados.status_revisao)."""
+    PENDING  = 'pendente'
+    DONE     = 'concluida'
+    EXTRA_QA = 'Extra QA'
+
+# ── MAPEAMENTO DE COLUNAS DO EXCEL ───────────────────────────────────────
+EXCEL_HEADER_ROW = 1  # Linha do cabeçalho (dados iniciam na linha seguinte)
+EXCEL_COLUMNS = {
+    'nome':            2,
+    'cargo':           3,
+    'diretoria':       4,
+    'plataforma':      5,
+    'area':            6,
+    'nivel':           7,
+    'dt_entrevista':   8,
+    'tipo_entrevista': 9,
+}
 
 # ── CADEIA DE VALOR (7 ETAPAS) ─────────────────────────────────────────
 CADEIA_VALOR = {

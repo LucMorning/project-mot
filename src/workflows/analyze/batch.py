@@ -17,7 +17,7 @@ from google import genai
 import warnings
 import dotenv
 
-from src.config import DB_PATH
+from src.config import DB_PATH, ChunkStatus, AI_AGENT_SLEEP
 from src.agents import get_all_agents
 from src.database.repositories import (
     InsightsRepository, SistemasUsoRepository, RelacoesRepository, ChunksRepository
@@ -76,11 +76,11 @@ def build_integrated_glossary() -> str:
     cursor = conn.cursor()
 
     # Sistemas oficiais
-    cursor.execute("SELECT nome, etapa_processo FROM sistemas_ti")
+    cursor.execute("SELECT nome, etapa_processo FROM dim_sistemas")
     sistemas = [f"{r[0]} ({r[1]})" for r in cursor.fetchall()]
 
     # Cargos do ecossistema
-    cursor.execute("SELECT DISTINCT cargo FROM entrevistados WHERE cargo IS NOT NULL")
+    cursor.execute("SELECT DISTINCT cargo FROM stg_entrevistados WHERE cargo IS NOT NULL")
     cargos = [r[0] for r in cursor.fetchall()]
 
     conn.close()
@@ -135,7 +135,7 @@ async def process_one_chunk(
                 agent.get_schema()
             )
             results_map[agent_name] = res
-            await asyncio.sleep(2)  # Rate limiting entre agentes
+            await asyncio.sleep(AI_AGENT_SLEEP)  # Rate limiting entre agentes
         except Exception as e:
             print(f"      [ERRO AGENTE {agent_name}]: {e}")
             results_map[agent_name] = {}
@@ -297,10 +297,10 @@ async def run_batch_pipeline():
         # Busca IDs de 5 entrevistados com chunks pendentes
         cursor.execute("""
             SELECT DISTINCT e.id, e.nome
-            FROM transcricao_chunks c
-            JOIN transcricoes t ON c.id_transcricao = t.id
-            JOIN entrevistados e ON t.id_entrevistado = e.id
-            WHERE c.status_analise = 'pendente'
+            FROM stg_chunks c
+            JOIN stg_transcricoes t ON c.id_transcricao = t.id
+            JOIN stg_entrevistados e ON t.id_entrevistado = e.id
+            WHERE c.status_analise = ?
             ORDER BY e.id
             LIMIT 5
         """)
@@ -320,10 +320,10 @@ async def run_batch_pipeline():
         # Busca chunks desses entrevistados
         query = """
             SELECT c.id, c.conteudo, e.id as ent_id, e.nome, e.cargo
-            FROM transcricao_chunks c
-            JOIN transcricoes t ON c.id_transcricao = t.id
-            JOIN entrevistados e ON t.id_entrevistado = e.id
-            WHERE c.status_analise = 'pendente'
+            FROM stg_chunks c
+            JOIN stg_transcricoes t ON c.id_transcricao = t.id
+            JOIN stg_entrevistados e ON t.id_entrevistado = e.id
+            WHERE c.status_analise = ?
             AND e.id IN ({})
             ORDER BY e.id, c.ordem
         """.format(','.join(map(str, ent_ids)))

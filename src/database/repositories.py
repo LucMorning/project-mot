@@ -3,6 +3,8 @@ import json
 from typing import List, Dict, Optional, Any
 from pathlib import Path
 
+from src.config import IntervieweeStatus
+
 class BaseRepository:
     """Classe base para repositórios SQLite."""
     def __init__(self, db_path: str):
@@ -50,12 +52,12 @@ class BaseRepository:
 # ─────────────────────────────────────────────────────────────
 
 class EntrevistadosRepository(BaseRepository):
-    """Repository para tabela entrevistados (Atores)."""
+    """Repository para tabela stg_entrevistados (Atores)."""
 
     def insert(self, dados: Dict) -> int:
         """Insere um novo ator e retorna o ID."""
         query = """
-            INSERT INTO entrevistados (
+            INSERT INTO stg_entrevistados (
                 nome, cargo, diretoria, plataforma, area, nivel,
                 dt_entrevista, tipo_entrevista, arquivo_transcricao,
                 arquivo_cargo_pdf, status_revisao
@@ -66,18 +68,18 @@ class EntrevistadosRepository(BaseRepository):
             'dt_entrevista', 'tipo_entrevista', 'arquivo_transcricao',
             'arquivo_cargo_pdf', 'status_revisao',
         ]
-        return self._execute(query, self._extract_params(dados, fields, {'status_revisao': 'pendente'}))
+        return self._execute(query, self._extract_params(dados, fields, {'status_revisao': IntervieweeStatus.PENDING}))
 
     def get_pending(self, limit: int = 100) -> List[Dict]:
-        """Retorna lista de entrevistados com análise pendente."""
+        """Retorna lista de stg_entrevistados com análise pendente."""
         query = """
             SELECT e.id, e.nome, e.cargo, e.plataforma, e.dt_entrevista, t.texto_limpo, e.arquivo_cargo_pdf
-            FROM entrevistados e
-            JOIN transcricoes t ON e.id = t.id_entrevistado
-            WHERE e.status_revisao = 'pendente'
+            FROM stg_entrevistados e
+            JOIN stg_transcricoes t ON e.id = t.id_entrevistado
+            WHERE e.status_revisao = ?
             LIMIT ?
         """
-        rows = self._execute(query, (limit,), fetch=True)
+        rows = self._execute(query, (IntervieweeStatus.PENDING, limit,), fetch=True)
         return [
             {
                 'id': r[0], 'nome': r[1], 'cargo': r[2], 
@@ -89,14 +91,14 @@ class EntrevistadosRepository(BaseRepository):
     def update_status(self, entrevistado_id: int, status: str):
         """Atualiza o status de análise de um entrevistado."""
         self._execute(
-            "UPDATE entrevistados SET status_revisao = ? WHERE id = ?",
+            "UPDATE stg_entrevistados SET status_revisao = ? WHERE id = ?",
             (status, entrevistado_id)
         )
 
     def get_all_with_transcricao(self) -> list:
-        """Retorna todos os entrevistados que possuem arquivo de transcrição vinculado."""
+        """Retorna todos os stg_entrevistados que possuem arquivo de transcrição vinculado."""
         rows = self._execute(
-            "SELECT id, arquivo_transcricao FROM entrevistados WHERE arquivo_transcricao IS NOT NULL",
+            "SELECT id, arquivo_transcricao FROM stg_entrevistados WHERE arquivo_transcricao IS NOT NULL",
             fetch=True
         )
         return [{'id': r[0], 'arquivo_transcricao': r[1]} for r in rows]
@@ -106,19 +108,19 @@ class EntrevistadosRepository(BaseRepository):
 # ─────────────────────────────────────────────────────────────
 
 class TranscricoesRepository(BaseRepository):
-    """Repository para tabela transcricoes."""
+    """Repository para tabela stg_transcricoes."""
 
     def delete_all(self) -> int:
         """Remove todas as transcrições (com CASCADE para chunks)."""
         # Primeiro deleta chunks (dependentes)
-        self._execute("DELETE FROM transcricao_chunks")
+        self._execute("DELETE FROM stg_chunks")
         # Depois deleta transcrições
-        return self._execute("DELETE FROM transcricoes")
+        return self._execute("DELETE FROM stg_transcricoes")
 
     def insert(self, dados: Dict) -> int:
         """Insere uma transcrição."""
         query = """
-            INSERT INTO transcricoes (
+            INSERT INTO stg_transcricoes (
                 id_entrevistado, texto_completo, texto_limpo,
                 dt_gravacao, arquivo_origem
             ) VALUES (?, ?, ?, ?, ?)
@@ -131,16 +133,16 @@ class TranscricoesRepository(BaseRepository):
 # ─────────────────────────────────────────────────────────────
 
 class CargosRepository(BaseRepository):
-    """Repository para tabela cargos."""
+    """Repository para tabela stg_cargos."""
 
     def delete_all(self) -> int:
-        """Remove todos os cargos."""
-        return self._execute("DELETE FROM cargos")
+        """Remove todos os stg_cargos."""
+        return self._execute("DELETE FROM stg_cargos")
 
     def insert(self, dados: Dict) -> int:
         """Insere um cargo."""
         query = """
-            INSERT INTO cargos (
+            INSERT INTO stg_cargos (
                 titulo_cargo, arquivo_pdf, texto_extraido,
                 negocio_plataforma, diretoria, area_atuacao,
                 missao, desafios, responsabilidades,
@@ -160,12 +162,12 @@ class CargosRepository(BaseRepository):
 # ─────────────────────────────────────────────────────────────
 
 class InsightsRepository(BaseRepository):
-    """Repository para tabela insights_ia."""
+    """Repository para tabela fato_insights."""
 
     def delete_by_entrevistado(self, entrevistado_id: int) -> int:
         """Remove insights de um entrevistado."""
         return self._execute(
-            "DELETE FROM insights_ia WHERE id_entrevistado = ?",
+            "DELETE FROM fato_insights WHERE id_entrevistado = ?",
             (entrevistado_id,)
         )
 
@@ -177,7 +179,7 @@ class InsightsRepository(BaseRepository):
         sistemas_envolvidos requer json.dumps() e confianca tem default 0.9.
         """
         query = """
-            INSERT INTO insights_ia (
+            INSERT INTO fato_insights (
                 id_entrevistado, id_bloco, etapa_cadeia, categoria, subcategoria,
                 descricao, citacao_direta, sistemas_envolvidos, severidade,
                 confianca, modelo_ia
@@ -203,9 +205,9 @@ class InsightsRepository(BaseRepository):
         query = """
             SELECT i.categoria, i.subcategoria, i.descricao, i.severidade,
                    e.nome, e.cargo, e.area, i.etapa_cadeia
-            FROM insights_ia i
-            JOIN entrevistados e ON e.id = i.id_entrevistado
-            WHERE e.status_revisao = 'concluida'
+            FROM fato_insights i
+            JOIN stg_entrevistados e ON e.id = i.id_entrevistado
+            WHERE e.status_revisao = ?
             ORDER BY
                 CASE i.severidade
                     WHEN 'Alta' THEN 1
@@ -215,7 +217,7 @@ class InsightsRepository(BaseRepository):
                 i.dt_registro DESC
             LIMIT ?
         """
-        rows = self._execute(query, (limit,), fetch=True)
+        rows = self._execute(query, (IntervieweeStatus.DONE, limit,), fetch=True)
         return [
             {
                 "categoria": r[0], "subcategoria": r[1], "descricao": r[2],
@@ -230,19 +232,19 @@ class InsightsRepository(BaseRepository):
 # ─────────────────────────────────────────────────────────────
 
 class SistemasUsoRepository(BaseRepository):
-    """Repository para tabela sistemas_uso."""
+    """Repository para tabela fato_sistemas_uso."""
 
     def delete_by_entrevistado(self, entrevistado_id: int) -> int:
         """Remove sistemas de um entrevistado."""
         return self._execute(
-            "DELETE FROM sistemas_uso WHERE id_entrevistado = ?",
+            "DELETE FROM fato_sistemas_uso WHERE id_entrevistado = ?",
             (entrevistado_id,)
         )
 
     def insert(self, dados: Dict) -> int:
         """Insere registro de uso de sistema."""
         query = """
-            INSERT INTO sistemas_uso (
+            INSERT INTO fato_sistemas_uso (
                 id_entrevistado, id_bloco, sistema, como_usa, etapa_cadeia,
                 satisfacao, workaround
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -264,7 +266,7 @@ class SistemasUsoRepository(BaseRepository):
         # Verifica se já existe
         check_query = """
             SELECT id, como_usa, etapa_cadeia, workaround
-            FROM sistemas_uso
+            FROM fato_sistemas_uso
             WHERE id_entrevistado = ? AND LOWER(sistema) = LOWER(?)
         """
         rows = self._execute(check_query, (entrevistado_id, sistema), fetch=True)
@@ -283,7 +285,7 @@ class SistemasUsoRepository(BaseRepository):
             workaround_consolidado = workaround or dados.get('workaround', '')
 
             update_query = """
-                UPDATE sistemas_uso
+                UPDATE fato_sistemas_uso
                 SET como_usa = ?,
                     etapa_cadeia = ?,
                     workaround = ?
@@ -300,19 +302,19 @@ class SistemasUsoRepository(BaseRepository):
 # ─────────────────────────────────────────────────────────────
 
 class RelacoesRepository(BaseRepository):
-    """Repository para tabela relacoes."""
+    """Repository para tabela fato_relacoes."""
 
     def delete_by_entrevistado(self, entrevistado_id: int) -> int:
         """Remove relações de um entrevistado."""
         return self._execute(
-            "DELETE FROM relacoes WHERE id_entrevistado = ?",
+            "DELETE FROM fato_relacoes WHERE id_entrevistado = ?",
             (entrevistado_id,)
         )
 
     def insert(self, dados: Dict) -> int:
         """Insere uma relação."""
         query = """
-            INSERT INTO relacoes (
+            INSERT INTO fato_relacoes (
                 id_entrevistado, id_bloco, tipo, pessoa_citada, area_citada, contexto
             ) VALUES (?, ?, ?, ?, ?, ?)
         """
@@ -332,7 +334,7 @@ class RelacoesRepository(BaseRepository):
         # Verifica se já existe (busca por nome aproximado)
         check_query = """
             SELECT id, contexto, area_citada
-            FROM relacoes
+            FROM fato_relacoes
             WHERE id_entrevistado = ? AND LOWER(pessoa_citada) = LOWER(?)
         """
         rows = self._execute(check_query, (entrevistado_id, pessoa_citada), fetch=True)
@@ -350,7 +352,7 @@ class RelacoesRepository(BaseRepository):
                 contexto_consolidado = f"{contexto or ''} | {novo_contexto}"
 
             update_query = """
-                UPDATE relacoes
+                UPDATE fato_relacoes
                 SET area_citada = ?, contexto = ?
                 WHERE id = ?
             """
@@ -364,7 +366,7 @@ class RelacoesRepository(BaseRepository):
         """Retorna todas as relações de um entrevistado."""
         query = """
             SELECT tipo, pessoa_citada, area_citada, contexto
-            FROM relacoes
+            FROM fato_relacoes
             WHERE id_entrevistado = ?
         """
         rows = self._execute(query, (entrevistado_id,), fetch=True)
@@ -381,11 +383,11 @@ class RelacoesRepository(BaseRepository):
 # ─────────────────────────────────────────────────────────────
 
 class ChunksRepository(BaseRepository):
-    """Repository para tabela transcricao_chunks."""
+    """Repository para tabela stg_chunks."""
 
     def mark_done(self, chunk_id: int):
         """Marca um chunk como analisado/concluiío."""
         self._execute(
-            "UPDATE transcricao_chunks SET status_analise = 'concluido' WHERE id = ?",
+            "UPDATE stg_chunks SET status_analise = 'concluido' WHERE id = ?",
             (chunk_id,)
         )

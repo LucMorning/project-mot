@@ -13,6 +13,8 @@ import unidecode as _unidecode
 from src.config import (
     DB_PATH, LISTA_ENTREVISTAS, TRANSCRICOES_DIR,
     TRANSCRIPT_PREFIXES, TRANSCRIPT_EXTENSION,
+    EXCEL_COLUMNS, EXCEL_HEADER_ROW,
+    IntervieweeStatus,
 )
 from src.utils.name_matcher import build_name_file_map, get_best_match
 from src.workflows.ingest.deduplicator import (
@@ -57,8 +59,8 @@ def ingest_master_spreadsheet():
     count_updated = 0
     count_skipped = 0
 
-    for row in range(2, ws.max_row + 1):
-        nome = ws.cell(row=row, column=2).value
+    for row in range(EXCEL_HEADER_ROW + 1, ws.max_row + 1):
+        nome = ws.cell(row=row, column=EXCEL_COLUMNS['nome']).value
         # Filtra os vazios ou zeros
         if not nome or str(nome).strip() in ["", "0", "None"]:
             continue
@@ -71,12 +73,12 @@ def ingest_master_spreadsheet():
         nome = re.sub(r'\s+Parte\s+\d+$', '', nome, flags=re.IGNORECASE)
         nome = re.sub(r'\s*-\s*[A-Z]$', '', nome)
 
-        cargo = ws.cell(row=row, column=3).value
-        diretoria = ws.cell(row=row, column=4).value
-        plataforma = ws.cell(row=row, column=5).value
-        area = ws.cell(row=row, column=6).value
-        nivel = ws.cell(row=row, column=7).value
-        dt_entrevista = ws.cell(row=row, column=8).value
+        cargo           = ws.cell(row=row, column=EXCEL_COLUMNS['cargo']).value
+        diretoria       = ws.cell(row=row, column=EXCEL_COLUMNS['diretoria']).value
+        plataforma      = ws.cell(row=row, column=EXCEL_COLUMNS['plataforma']).value
+        area            = ws.cell(row=row, column=EXCEL_COLUMNS['area']).value
+        nivel           = ws.cell(row=row, column=EXCEL_COLUMNS['nivel']).value
+        dt_entrevista   = ws.cell(row=row, column=EXCEL_COLUMNS['dt_entrevista']).value
 
         # Diretoria: NULL se for "0", "#N/A", vazio
         if diretoria and str(diretoria).strip() in ["0", "#N/A", "", "None", "NA"]:
@@ -88,7 +90,7 @@ def ingest_master_spreadsheet():
         elif dt_entrevista:
             dt_entrevista = str(dt_entrevista)
 
-        tipo_entrevista = ws.cell(row=row, column=9).value
+        tipo_entrevista = ws.cell(row=row, column=EXCEL_COLUMNS['tipo_entrevista']).value
 
         arquivo_docx = get_best_match(nome, available)
 
@@ -97,13 +99,13 @@ def ingest_master_spreadsheet():
 
         if existing_id:
             # UPDATE do existente - usa o nome mais longo (mais completo)
-            cursor.execute("SELECT nome FROM entrevistados WHERE id = ?", (existing_id,))
+            cursor.execute("SELECT nome FROM stg_entrevistados WHERE id = ?", (existing_id,))
             current_nome = cursor.fetchone()[0]
             # Mantém o nome mais longo
             nome_to_use = nome if len(nome) > len(current_nome) else current_nome
 
             cursor.execute("""
-                UPDATE entrevistados
+                UPDATE stg_entrevistados
                 SET nome = ?, cargo = ?, diretoria = ?, plataforma = ?, area = ?, nivel = ?,
                     dt_entrevista = ?, tipo_entrevista = ?
                 WHERE id = ?
@@ -112,14 +114,14 @@ def ingest_master_spreadsheet():
         else:
             # INSERT novo
             cursor.execute("""
-                INSERT INTO entrevistados
+                INSERT INTO stg_entrevistados
                 (nome, cargo, diretoria, plataforma, area, nivel, dt_entrevista, tipo_entrevista, arquivo_transcricao)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (nome, cargo, diretoria, plataforma, area, nivel, dt_entrevista, tipo_entrevista, arquivo_docx))
             count_inserted += 1
 
     # Lógica QA Integridade: Inserir DOCXs físicos que sobraram e não estão no Excel
-    used_files = [x[0] for x in cursor.execute("SELECT arquivo_transcricao FROM entrevistados WHERE arquivo_transcricao IS NOT NULL").fetchall()]
+    used_files = [x[0] for x in cursor.execute("SELECT arquivo_transcricao FROM stg_entrevistados WHERE arquivo_transcricao IS NOT NULL").fetchall()]
     for arquivo_solto in available:
         if arquivo_solto not in used_files:
             nome_base = arquivo_solto
@@ -136,7 +138,7 @@ def ingest_master_spreadsheet():
 
             if existing_id:
                 # Verifica se é a mesma pessoa com tipo DIFERENTE de entrevista
-                cursor.execute("SELECT tipo_entrevista, arquivo_transcricao FROM entrevistados WHERE id = ?", (existing_id,))
+                cursor.execute("SELECT tipo_entrevista, arquivo_transcricao FROM stg_entrevistados WHERE id = ?", (existing_id,))
                 existente = cursor.fetchone()
                 tipo_existente = existente[0] if existente else None
                 arquivo_existente = existente[1] if existente else None
@@ -149,10 +151,10 @@ def ingest_master_spreadsheet():
                     continue
 
             cursor.execute("""
-                INSERT INTO entrevistados
+                INSERT INTO stg_entrevistados
                 (nome, cargo, arquivo_transcricao, tipo_entrevista, status_revisao)
-                VALUES (?, 'Não Identificado (Arquivo Extra)', ?, 'Extra QA', 'pendente')
-            """, (nome_assumed, arquivo_solto))
+                VALUES (?, 'Não Identificado (Arquivo Extra)', ?, ?, ?)
+            """, (nome_assumed, arquivo_solto, IntervieweeStatus.EXTRA_QA, IntervieweeStatus.PENDING))
             count_inserted += 1
 
     # 2. LIMPA DUPLICATAS DEPOIS DE INGERIR (para lidar com duplicatas do Excel)

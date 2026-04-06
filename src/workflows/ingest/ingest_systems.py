@@ -1,36 +1,19 @@
+"""
+Sistemas TI Ingest - Mapeia relatório de sistemas TI para o banco.
+
+Usa tabelas dim_sistemas e dim_processos criadas pelo schema.py.
+"""
 import sqlite3
 import sys
 sys.path.insert(0, '.')
 from src.config import DB_PATH
 
+
 def map_sistemas_ti_to_db():
     """Mapeia os dados do Relatório de Sistemas TI para o banco de dados."""
 
-    # Conectar ao banco
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-
-    # Criar tabela de sistemas
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sistemas_ti (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
-            etapa_processo TEXT,
-            area_responsavel TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # Criar tabela de processos
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS processos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
-            area_responsavel TEXT,
-            unidade_negocio TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
 
     # Dados do Slide 2 - Visão Macro de Sistemas (25 sistemas em 7 etapas)
     sistemas_data = [
@@ -181,24 +164,24 @@ def map_sistemas_ti_to_db():
     # Inserir sistemas
     for sistema in sistemas_data:
         cursor.execute('''
-            INSERT OR REPLACE INTO sistemas_ti (nome, etapa_processo, area_responsavel)
+            INSERT OR REPLACE INTO dim_sistemas (nome, etapa_processo, area_responsavel)
             VALUES (?, ?, ?)
         ''', sistema)
 
     # Inserir processos
     for processo in processos_data:
         cursor.execute('''
-            INSERT OR REPLACE INTO processos (nome, area_responsavel, unidade_negocio)
+            INSERT OR REPLACE INTO dim_processos (nome, area_responsavel, unidade_negocio)
             VALUES (?, ?, ?)
         ''', processo)
 
     conn.commit()
 
     # Contar registros
-    cursor.execute('SELECT COUNT(*) FROM sistemas_ti')
+    cursor.execute('SELECT COUNT(*) FROM dim_sistemas')
     sistemas_count = cursor.fetchone()[0]
 
-    cursor.execute('SELECT COUNT(*) FROM processos')
+    cursor.execute('SELECT COUNT(*) FROM dim_processos')
     processos_count = cursor.fetchone()[0]
 
     conn.close()
@@ -208,5 +191,5 @@ def map_sistemas_ti_to_db():
     print(f'[MAPEAMENTO] Mapeamento concluído com sucesso!')
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     map_sistemas_ti_to_db()
