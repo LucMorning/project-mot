@@ -17,7 +17,14 @@ from google import genai
 import warnings
 import dotenv
 
-from src.config import DB_PATH, ChunkStatus, AI_AGENT_SLEEP
+from src.config import (
+    DB_PATH, ChunkStatus, AI_AGENT_SLEEP, AI_MODEL,
+    BATCH_SIZE, BATCH_SLEEP, BATCH_ERROR_THRESHOLD
+)
+
+MODEL_NAME = AI_MODEL
+ERROR_THRESHOLD = BATCH_ERROR_THRESHOLD
+consecutive_errors = 0
 from src.agents import get_all_agents
 from src.database.repositories import (
     InsightsRepository, SistemasUsoRepository, RelacoesRepository, ChunksRepository
@@ -65,6 +72,35 @@ class AgentOrchestrator:
 
 
 # ─────────────────────────────────────────────────────────────
+# SYSTEMS CATALOG LOADER (Whitelist)
+# ─────────────────────────────────────────────────────────────
+
+def load_sistemas_oficiais() -> list:
+    """
+    Carrega lista de sistemas oficiais do catálogo TI.
+
+    Retorna apenas sistemas com fonte='relatorio_ti' (catálogo oficial).
+    Usado para configurar whitelist do SystemsAgent.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    query = """
+        SELECT nome
+        FROM dim_sistemas
+        WHERE COALESCE(fonte, '') = 'relatorio_ti'
+        ORDER BY nome
+    """
+    cursor.execute(query)
+    sistemas = [r[0] for r in cursor.fetchall()]
+    conn.close()
+
+    return sistemas
+
+
+# ─────────────────────────────────────────────────────────────
 # GLOSSARY BUILDER
 # ─────────────────────────────────────────────────────────────
 
@@ -75,9 +111,13 @@ def build_integrated_glossary() -> str:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Sistemas oficiais
-    cursor.execute("SELECT nome, etapa_processo FROM dim_sistemas")
-    sistemas = [f"{r[0]} ({r[1]})" for r in cursor.fetchall()]
+    # Sistemas oficiais - JOIN com dim_cadeia_valor para pegar nome da etapa
+    cursor.execute("""
+        SELECT s.nome, c.nome
+        FROM dim_sistemas s
+        LEFT JOIN dim_cadeia_valor c ON s.id_etapa_cadeia = c.id
+    """)
+    sistemas = [f"{r[0]} ({r[1]})" for r in cursor.fetchall() if r[0]]
 
     # Cargos do ecossistema
     cursor.execute("SELECT DISTINCT cargo FROM stg_entrevistados WHERE cargo IS NOT NULL")
@@ -156,6 +196,17 @@ async def process_one_chunk(
     return False
 
 
+# Mapeamento de texto da IA para IDs da Cadeia de Valor (para FKs)
+_ETAPA_NAME_TO_ID = {
+    'Novos Negócios & Demandas': 1, '1': 1, 'Novos Negócios': 1,
+    'Orçamento': 2, '2': 2, 'Orcamento': 2,
+    'Estruturação': 3, '3': 3, 'Estruturacao': 3,
+    'Contratação & Execução': 4, '4': 4, 'Contratacao': 4, 'Execução': 4,
+    'Medição': 5, '5': 5, 'Medicao': 5,
+    'Tendência': 6, '6': 6, 'Tendencia': 6,
+    'Fiscal & Pagamento': 7, '7': 7, 'Fiscal': 7, 'Pagamento': 7
+}
+
 def save_successful_results(
     entrevistado_id: int,
     chunk_id: int,
@@ -176,14 +227,20 @@ def save_successful_results(
         # 1. Dores (mantém insert - cada insight é único)
         dores = results_list[0].get("dores", [])
         for dor in dores:
+            etapa_str = dor.get("etapa_cadeia_valor", "")
+            id_etapa = _ETAPA_NAME_TO_ID.get(etapa_str) 
+            
             insights_repo.insert({
                 'id_entrevistado': entrevistado_id,
                 'id_bloco': chunk_id,
-                'etapa_cadeia': dor.get("etapa_cadeia_valor"),
+                'id_etapa_cadeia': id_etapa, # FK correta
                 'categoria': 'Dor',
                 'subcategoria': dor.get("subcategoria"),
                 'descricao': dor.get("descricao"),
                 'citacao_direta': dor.get("citacao_direta"),
+                'linhagem_dados': dor.get("linhagem_dado"),
+                'risco_estimado': dor.get("risco_ao_negocio"),
+                'area_impactada': dor.get("area_impactada"),
                 'sistemas_envolvidos': dor.get("sistemas_envolvidos", []),
                 'severidade': dor.get("impacto"),
                 'confianca': dor.get("confianca", 0.9),
@@ -199,9 +256,11 @@ def save_successful_results(
                 'id_bloco': chunk_id,
                 'sistema': sis.get("nome_sistema"),
                 'como_usa': f"{sis.get('finalidade')} {sis.get('forma_uso')}",
-                'etapa_cadeia': sis.get("etapa_cadeia"),
                 'satisfacao': sis.get("satisfacao"),
-                'workaround': sis.get("problema_principal")
+                'workaround': sis.get("problema_principal"),
+                'entradas': sis.get("inputs"),
+                'saidas': sis.get("outputs"),
+                'is_excel_bridge': 1 if sis.get("is_excel_bridge") else 0
             })
             if result_id:
                 sistemas_upserted += 1
@@ -263,12 +322,21 @@ async def run_batch_pipeline():
     """
     global consecutive_errors
 
-    dotenv.load_dotenv()
+    # Load .env from project root (not current directory)
+    from pathlib import Path
+    project_root = Path(__file__).parent.parent.parent
+    dotenv.load_dotenv(project_root / '.env')
     api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
         print("[ERRO] GEMINI_API_KEY não configurada!")
         return
+
+    # Configura SystemsAgent com whitelist de sistemas oficiais
+    sistemas_oficiais = load_sistemas_oficiais()
+    from src.agents import configure_systems_agent
+    configure_systems_agent(sistemas_oficiais)
+    print(f"[WHITELIST] SystemsAgent configurado com {len(sistemas_oficiais)} sistemas oficiais")
 
     ai = GeminiProvider(api_key=api_key)
     glossary = build_integrated_glossary()
@@ -299,11 +367,12 @@ async def run_batch_pipeline():
             SELECT DISTINCT e.id, e.nome
             FROM stg_chunks c
             JOIN stg_transcricoes t ON c.id_transcricao = t.id
-            JOIN stg_entrevistados e ON t.id_entrevistado = e.id
+            JOIN stg_arquivos_transcricao a ON t.id_arquivo_transcricao = a.id
+            JOIN stg_entrevistados e ON a.id_entrevistado = e.id
             WHERE c.status_analise = ?
             ORDER BY e.id
             LIMIT 5
-        """)
+        """, (ChunkStatus.PENDING,))
         entrevistados = cursor.fetchall()
 
         if not entrevistados:
@@ -322,12 +391,13 @@ async def run_batch_pipeline():
             SELECT c.id, c.conteudo, e.id as ent_id, e.nome, e.cargo
             FROM stg_chunks c
             JOIN stg_transcricoes t ON c.id_transcricao = t.id
-            JOIN stg_entrevistados e ON t.id_entrevistado = e.id
+            JOIN stg_arquivos_transcricao a ON t.id_arquivo_transcricao = a.id
+            JOIN stg_entrevistados e ON a.id_entrevistado = e.id
             WHERE c.status_analise = ?
             AND e.id IN ({})
             ORDER BY e.id, c.ordem
         """.format(','.join(map(str, ent_ids)))
-        cursor.execute(query)
+        cursor.execute(query, (ChunkStatus.PENDING,))
         chunks = cursor.fetchall()
 
         if not chunks:

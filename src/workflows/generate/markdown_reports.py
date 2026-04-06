@@ -236,5 +236,10 @@ def generate_all_markdowns(output_dir: Path = None) -> int:
     return count
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point para Poetry scripts."""
     generate_all_markdowns()
+
+
+if __name__ == "__main__":
+    main()

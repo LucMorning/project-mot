@@ -39,14 +39,15 @@ def run_reports(format: str = "markdown"):
     return True
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point para Poetry scripts."""
     parser = argparse.ArgumentParser(
         description="Workflow de geração de relatórios - MOTIVA",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemplos:
-  python -m src.workflows reports --format markdown
-  python -m src.workflows reports --format pptx
+  poetry run reports --format markdown
+  poetry run reports --format pptx
         """
     )
 
@@ -59,3 +60,7 @@ Exemplos:
 
     args = parser.parse_args()
     run_reports(format=args.format)
+
+
+if __name__ == "__main__":
+    main()

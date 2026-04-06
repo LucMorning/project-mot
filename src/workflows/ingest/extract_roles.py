@@ -246,5 +246,10 @@ def ingest_cargos():
     print(f"[SUCCESS] Ingested {count} PDF roles with structured sections.")
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point para Poetry scripts."""
     ingest_cargos()
+
+
+if __name__ == "__main__":
+    main()

@@ -42,16 +42,17 @@ class GeminiProvider:
         model_name: Nome do modelo (ex: gemini-2.5-flash)
     """
 
-    def __init__(self, api_key: str, model_name: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: str, model_name: str = None):
         """
         Inicializa o provider Gemini.
 
         Args:
             api_key: Chave da API Gemini
-            model_name: Nome do modelo a usar
+            model_name: Nome do modelo a usar (default: AI_MODEL do config)
         """
+        from src.config import AI_MODEL
         self.client = genai.Client(api_key=api_key)
-        self.model_name = model_name
+        self.model_name = model_name or AI_MODEL
 
     def analyze(
         self,

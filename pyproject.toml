@@ -1,0 +1,48 @@
+[tool.poetry]
+name = "motiva"
+version = "0.1.0"
+description = "MOTIVA CAPEX Analysis Pipeline - Automated diagnostic report generation using AI agents"
+authors = ["LucMorning <lucmorning@example.com>"]
+readme = "README.md"
+packages = [
+    { include = "src" }
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pydantic = "^2.0.0"
+python-dotenv = "^1.0.0"
+openpyxl = "3.1.5"
+pdfplumber = "^0.10.0"
+python-docx = "^1.0.0"
+unidecode = "^1.3.0"
+google-generativeai = "^0.8.0"
+pymupdf = "^1.23.0"
+pdf2image = "^1.16.0"
+pytesseract = "^0.3.10"
+python-pptx = "1.0.2"
+pandas = "^2.0.0"
+
+[tool.poetry.scripts]
+# Ingestão (Estágio 1)
+ingest = "src.workflows.ingestion:main"
+ingest-metadata = "src.workflows.ingest.ingest_metadata:main"
+extract-roles = "src.workflows.ingest.extract_roles:main"
+extract-transcripts = "src.workflows.ingest.extract_transcripts:main"
+create-chunks = "src.workflows.ingest.create_chunks:main"
+ingest-systems = "src.workflows.ingest.ingest_systems:main"
+link-roles = "src.workflows.ingest.link_roles:main"
+deduplicate = "src.workflows.ingest.deduplicator:main"
+
+# Análise IA (Estágio 2)
+analyze = "src.workflows.ai_analysis:main"
+analyze-batch = "src.workflows.analyze.batch:main"
+analyze-staged = "src.workflows.analyze.staged:main"
+
+# Relatórios (Estágio 3)
+reports = "src.workflows.reports:main"
+generate-markdown = "src.workflows.generate.markdown_reports:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

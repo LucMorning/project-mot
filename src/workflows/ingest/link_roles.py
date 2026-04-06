@@ -88,5 +88,10 @@ def link_roles_to_interviewees():
         print(f"[AVISO] {len(not_found)} cargos não encontraram correspondência.")
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point para Poetry scripts."""
     link_roles_to_interviewees()
+
+
+if __name__ == "__main__":
+    main()

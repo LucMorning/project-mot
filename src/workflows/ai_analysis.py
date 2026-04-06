@@ -34,7 +34,7 @@ except Exception as e:
     STAGED_ERROR = str(e)
 
 
-def run_ai_batch():
+def run_ai_batch(max_rounds: int = None):
     """Executa o pipeline batch de IA."""
     if not AI_BATCH_AVAILABLE:
         print(f"[ERRO] Pipeline batch não disponível: {BATCH_ERROR}")
@@ -42,10 +42,12 @@ def run_ai_batch():
 
     print("\n" + "="*60)
     print("AI WORKFLOW - Modo: BATCH (Produção)")
+    if max_rounds:
+        print(f"Limite: {max_rounds} rodadas")
     print("="*60 + "\n")
 
     import asyncio
-    asyncio.run(run_batch_pipeline())
+    asyncio.run(run_batch_pipeline(max_rounds=max_rounds))
 
     return True
 
@@ -95,17 +97,18 @@ def run_ai_staged():
     return True
 
 
-def run_ai_analysis(mode: str = "batch"):
+def run_ai_analysis(mode: str = "batch", max_rounds: int = None):
     """
     Executa o workflow de análise com IA.
 
     Args:
         mode: 'batch' ou 'staged'
+        max_rounds: limite de rodadas (apenas para batch)
     """
     print(f"\n[INFO] Modo selecionado: {mode.upper()}")
 
     if mode == "batch":
-        return run_ai_batch()
+        return run_ai_batch(max_rounds=max_rounds)
     elif mode == "staged":
         return run_ai_staged()
     else:
@@ -113,14 +116,15 @@ def run_ai_analysis(mode: str = "batch"):
         return False
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point para Poetry scripts."""
     parser = argparse.ArgumentParser(
         description="Workflow de análise com IA - MOTIVA",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemplos:
-  python -m src.workflows ai --mode batch
-  python -m src.workflows ai --mode staged
+  poetry run analyze --mode batch
+  poetry run analyze --mode staged
         """
     )
 
@@ -130,6 +134,16 @@ Exemplos:
         default="batch",
         help="Modo de execução (default: batch)"
     )
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=None,
+        help="Máximo de rodadas (apenas para batch)"
+    )
 
     args = parser.parse_args()
-    run_ai_analysis(mode=args.mode)
+    run_ai_analysis(mode=args.mode, max_rounds=args.max_rounds)
+
+
+if __name__ == "__main__":
+    main()

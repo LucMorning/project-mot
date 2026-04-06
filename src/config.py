@@ -32,7 +32,7 @@ TRANSCRIPT_EXTENSION  = ".docx"
 
 # ── API / IA ───────────────────────────────────────────────────────────
 AI_PROVIDER    = "gemini"  # "openai" | "gemini" | "anthropic" | "ollama"
-AI_MODEL       = "gemini-2.0-flash"  # Modelos disponíveis: gemini-2.0-flash, gemini-2.5-flash
+AI_MODEL       = "gemini-flash-latest"  # Modelos disponíveis: gemini-flash-latest, gemini-pro-latest
 AI_API_KEY_ENV = "GEMINI_API_KEY"
 AI_MAX_RETRIES = 3
 AI_RETRY_DELAY = 5         # segundos entre retries
@@ -40,8 +40,18 @@ AI_TEMPERATURE = 0.1       # temperatura para geração estruturada (JSON mode)
 AI_AGENT_SLEEP = 2         # segundos entre chamadas de agente (rate limit intra-chunk)
 
 # Pipeline Multi-Etapas
-BATCH_SIZE             = 3   # Número de entrevistados processados em paralelo
+BATCH_SIZE             = 3   # Número de chunks processados em paralelo (via asyncio.gather)
+BATCH_INTERVIEWEES     = 5   # Número de entrevistados buscados por rodada (SQL LIMIT)
+BATCH_SLEEP            = 10  # Segundos entre batches de chunks
+BATCH_ERROR_THRESHOLD  = 5   # Máximo de erros consecutivos (rate limit) antes de parar
 CONTEXT_INSIGHTS_LIMIT = 15  # Número de insights anteriores usados como contexto
+
+# Filtros e Fallbacks
+INVALID_ENTITY_NAMES    = {'N/A', 'NÃO INFORMADO', 'NA', 'NONE', '', 'NI'}
+AI_CONFIDENCE_DEFAULT   = 0.9
+AI_CONFIDENCE_PROCESS   = 0.95
+GLOSSARY_CARGOS_LIMIT   = 30
+AGENT_FALLBACK          = 'pain_points'
 
 # ── CHUNKING ────────────────────────────────────────────────────────────
 CHUNK_MAX_SIZE     = 15000  # Caracteres por chunk (≈ 3k tokens Gemini Flash)
@@ -64,25 +74,25 @@ class IntervieweeStatus:
 # ── MAPEAMENTO DE COLUNAS DO EXCEL ───────────────────────────────────────
 EXCEL_HEADER_ROW = 1  # Linha do cabeçalho (dados iniciam na linha seguinte)
 EXCEL_COLUMNS = {
-    'nome':            2,
-    'cargo':           3,
-    'diretoria':       4,
-    'plataforma':      5,
-    'area':            6,
-    'nivel':           7,
-    'dt_entrevista':   8,
-    'tipo_entrevista': 9,
+    'nome':              2,
+    'cargo':             3,
+    'diretoria':         4,
+    'unidade_negocio':   5,  # era "plataforma" - padronizado com dim_processos
+    'area':              6,
+    'nivel':             7,
+    'dt_entrevista':     8,
+    'tipo_entrevista':   9,
 }
 
 # ── CADEIA DE VALOR (7 ETAPAS) ─────────────────────────────────────────
 CADEIA_VALOR = {
-    "1. Novos Negócios & Demandas": ["abertura", "demanda", "aprovacao", "viabilidade", "novo negócio", "proposta"],
-    "2. Orçamento": ["orçamento", "budget", "custos", "capex", "estimativa", "valor"],
-    "3. Estruturação (Plan/Custo)": ["planejamento", "cronograma", "eap", "wbs", "físico", "financeiro", "compor 90", "prisma", "project", "p6"],
-    "4. Contratação & Execução": ["contrato", "aditivo", "compras", "coupa", "netlex", "flexchain", "docusign", "suprimentos"],
-    "5. Medição": ["medição", "boletim", "rdo", "relatório diário", "conecta", "fulcrum", "kartado", "validação"],
-    "6. Tendência": ["tendência", "projeção", "forecast", "risco", "archer", "bw", "bpc", "power bi"],
-    "7. Fiscal (NF) & Pagamento": ["nota fiscal", "nf", "pagamento", "v360", "atlas", "conciliação", "fi", "ap"],
+    "Novos Negócios & Demandas":    ["abertura", "demanda", "aprovacao", "viabilidade", "novo negócio", "proposta"],
+    "Orçamento":                      ["orçamento", "budget", "custos", "capex", "estimativa", "valor"],
+    "Estruturação":                    ["planejamento", "cronograma", "eap", "wbs", "físico", "financeiro", "compor 90", "prisma", "project", "p6"],
+    "Contratação & Execução":         ["contrato", "aditivo", "compras", "coupa", "netlex", "flexchain", "docusign", "suprimentos"],
+    "Medição":                         ["medição", "boletim", "rdo", "relatório diário", "conecta", "fulcrum", "kartado", "validação"],
+    "Tendência":                        ["tendência", "projeção", "forecast", "risco", "archer", "bw", "bpc", "power bi"],
+    "Fiscal & Pagamento":              ["nota fiscal", "nf", "pagamento", "v360", "atlas", "conciliação", "fi", "ap"],
 }
 
 # ── SISTEMAS (25+ ferramentas identificadas) ──────────────────────────
@@ -116,3 +126,39 @@ TEMAS_MAP = {
     "Gestão de Mudança e Pessoas": ["comunicação", "equipe", "treinamento", "capacitação", "cultura", "resistência", "mudança"],
     "Riscos e Compliance": ["risco", "auditoria", "compliance", "mitigação", "controle", "falha", "segurança"]
 }
+
+# ── UNIDADES DE NEGÓCIO (Domínio centralizado) ───────────────────────────
+# Usado em: stg_entrevistados.plataforma e dim_processos.unidade_negocio
+UNIDADES_NEGOCIO = [
+    "CORPORATIVO",
+    "TRILHOS",
+    "RODOVIAS",
+]
+
+
+def normalize_unidade(value: str) -> str | None:
+    """
+    Normaliza nome de unidade de negócio para formato padrão UPPERCASE.
+
+    Aplica fuzzy match para variações como "trilhos", "TRILHOS", "Trilhos",
+    garantindo consistência entre stg_entrevistados.plataforma e
+    dim_processos.unidade_negocio.
+
+    Args:
+        value: Valor bruto do Excel/relatório
+
+    Returns:
+        Nome normalizado (UPPERCASE) ou None se vazio
+    """
+    if not value or str(value).strip() in ["", "0", "None", "NA", "N/A"]:
+        return None
+
+    normalized = str(value).strip().upper()
+
+    # Fuzzy match para variações comuns
+    for unidade in UNIDADES_NEGOCIO:
+        if unidade in normalized or normalized in unidade:
+            return unidade
+
+    # Fallback: retorna o valor normalizado (útil para descobrir novos valores)
+    return normalized

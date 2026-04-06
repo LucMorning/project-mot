@@ -198,12 +198,16 @@ class DatabaseService:
             # 1. Salva DORES
             for dor in dores.get("dores", []):
                 insights_repo.insert({
-                    'entrevistado_id': entrevistado_id,
-                    'etapa_cadeia_valor': dor.get("etapa_cadeia_valor"),
+                    'id_entrevistado': entrevistado_id,
+                    'id_bloco': None,  # staged costuma processar texto completo, id_bloco é opcional
+                    'etapa_cadeia': dor.get("etapa_cadeia_valor"),
                     'categoria': 'Dor',
                     'subcategoria': dor.get("subcategoria"),
                     'descricao': dor.get("descricao"),
                     'citacao_direta': dor.get("citacao_direta"),
+                    'linhagem_dados': dor.get("linhagem_dado"),
+                    'risco_estimado': dor.get("risco_ao_negocio"),
+                    'area_impactada': dor.get("area_impactada"),
                     'sistemas_envolvidos': dor.get("sistemas_envolvidos", []),
                     'severidade': {"Alto": "Alta", "Médio": "Media", "Baixo": "Baixa"}.get(
                         dor.get("impacto", "Médio"), "Media"
@@ -215,12 +219,16 @@ class DatabaseService:
             # 2. Salva SISTEMAS
             for sistema in sistemas.get("sistemas", []):
                 sistemas_repo.insert({
-                    'entrevistado_id': entrevistado_id,
+                    'id_entrevistado': entrevistado_id,
+                    'id_bloco': None,
                     'sistema': sistema.get("nome_sistema"),
                     'como_usa': f"{sistema.get('finalidade')}. {sistema.get('forma_uso')}",
                     'etapa_cadeia': sistema.get("etapa_cadeia"),
                     'satisfacao': sistema.get("satisfacao"),
-                    'workaround': sistema.get("problema_principal") or "Nenhum"
+                    'workaround': sistema.get("problema_principal") or "Nenhum",
+                    'entradas': sistema.get("inputs"),
+                    'saidas': sistema.get("outputs"),
+                    'is_excel_bridge': 1 if sistema.get("is_excel_bridge") else 0
                 })
 
             # 3. Salva RELAÇÕES
@@ -814,5 +822,10 @@ def main():
         time.sleep(2)
 
 
-if __name__ == "__main__":
+def run_cli():
+    """Entry point para Poetry scripts."""
     main()
+
+
+if __name__ == "__main__":
+    run_cli()

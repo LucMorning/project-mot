@@ -6,59 +6,84 @@ Usa tabelas dim_sistemas e dim_processos criadas pelo schema.py.
 import sqlite3
 import sys
 sys.path.insert(0, '.')
-from src.config import DB_PATH
+from src.config import DB_PATH, normalize_unidade
 
 
 def map_sistemas_ti_to_db():
-    """Mapeia os dados do Relatório de Sistemas TI para o banco de dados."""
+    """
+    Recria dim_sistemas do zero com schema correto (sem etapa_processo, com FK).
 
+    DROP + CREATE garante schema limpo sem colunas legadas.
+    A tabela fato_sistemas_uso referencia dim_sistemas por id, que é preservado
+    apenas via AUTOINCREMENT — mas como este é o catálogo master (não fatos),
+    recriar é seguro desde que fato_sistemas_uso também seja limpa antes.
+    """
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = OFF")
     cursor = conn.cursor()
 
+    # Limpa dados dependentes e recria a dimensão com schema correto
+    cursor.execute("DELETE FROM fato_sistemas_uso")  # Remove fatos que referenciam sistemas
+    cursor.execute("DROP TABLE IF EXISTS dim_sistemas")
+    cursor.execute("""
+        CREATE TABLE dim_sistemas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT UNIQUE,
+            id_etapa_cadeia INTEGER,
+            area_responsavel TEXT,
+            fonte TEXT DEFAULT 'relatorio_ti',
+            dt_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (id_etapa_cadeia) REFERENCES dim_cadeia_valor (id)
+        )
+    """)
+    conn.execute("PRAGMA foreign_keys = ON")
+
     # Dados do Slide 2 - Visão Macro de Sistemas (25 sistemas em 7 etapas)
+    # IDs das Etapas (CADEIA_VALOR_ETAPAS):
+    # 3: Estruturação, 4: Contratação & Execução, 5: Medição, 6: Tendência, 7: Fiscal & Pagamento
     sistemas_data = [
-        # Etapa 1: Estruturação PEP e EAP
-        ('Prisma', 'Estruturação PEP e EAP', None),
-        ('Fli/CO', 'Estruturação PEP e EAP', None),
-        ('SAP PS', 'Estruturação PEP e EAP', None),
-        ('Compor 90', 'Estruturação PEP e EAP', None),
-        ('Excel', 'Estruturação PEP e EAP', None),
-        ('Project', 'Estruturação PEP e EAP', None),
+        # Etapa 3: Estruturação
+        ('Prisma', 3, None),
+        ('Fli/CO', 3, None),
+        ('SAP PS', 3, None),
+        ('Compor 90', 3, None),
+        ('Excel', 3, None),
+        ('Project', 3, None),
 
-        # Etapa 2: Contratação
-        ('DocuSign', 'Contratação', None),
-        ('Coupia', 'Contratação', None),
-        ('SAP', 'Contratação', None),
-        ('Teams', 'Contratação', None),
-        ('Netflex', 'Contratação', None),
-        ('Flexchain', 'Contratação', None),
+        # Etapa 4: Contratação & Execução
+        ('DocuSign', 4, None),
+        ('Coupia', 4, None),
+        ('SAP', 4, None),
+        ('Teams', 4, None),
+        ('Netflex', 4, None),
+        ('Flexchain', 4, None),
 
-        # Etapa 3: Planejamento e Execução
-        ('PM', 'Planejamento e Execução', None),
-        ('Kartado', 'Planejamento e Execução', None),
-        ('Power Apps', 'Planejamento e Execução', None),
-        ('SharePoint', 'Planejamento e Execução', None),
-        ('Conecta', 'Planejamento e Execução', None),
+        # Etapa 4: Contratação & Execução (cont.)
+        ('PM', 4, None),
+        ('Kartado', 4, None),
+        ('Power Apps', 4, None),
+        ('SharePoint', 4, None),
+        ('Conecta', 4, None),
 
-        # Etapa 4: Medição
-        ('Fulcrum', 'Medição', None),
-        ('SAP PS/FI', 'Medição', None),
+        # Etapa 5: Medição
+        ('Fulcrum', 5, None),
+        ('SAP PS/FI', 5, None),
 
-        # Etapa 5: Tendência
-        ('Archer', 'Tendência', None),
-        ('SAP BW/BPC', 'Tendência', None),
-        ('BI', 'Tendência', None),
-        ('Teams Idea', 'Tendência', None),
+        # Etapa 6: Tendência
+        ('Archer', 6, None),
+        ('SAP BW/BPC', 6, None),
+        ('BI', 6, None),
+        ('Teams Idea', 6, None),
 
-        # Etapa 6: Fiscal e NF
-        ('Atlas', 'Fiscal e NF', None),
-        ('V360', 'Fiscal e NF', None),
-        ('SAP FI', 'Fiscal e NF', None),
-        ('Forms', 'Fiscal e NF', None),
+        # Etapa 7: Fiscal & Pagamento
+        ('Atlas', 7, None),
+        ('V360', 7, None),
+        ('SAP FI', 7, None),
+        ('Forms', 7, None),
 
-        # Etapa 7: Pagamento
-        ('Painel de Chamados', 'Pagamento', None),
-        ('SAP FI/AP', 'Pagamento', None),
+        # Etapa 7: Fiscal & Pagamento (cont.)
+        ('Painel de Chamados', 7, None),
+        ('SAP FI/AP', 7, None),
     ]
 
     # Dados dos Slides 3, 4, 5 - Processos por Área
@@ -161,19 +186,21 @@ def map_sistemas_ti_to_db():
         ('Pré-Obra', 'Pré-Obra', 'Rodovias'),
     ]
 
-    # Inserir sistemas
+    # Inserir sistemas (todos marcados como fonte oficial)
     for sistema in sistemas_data:
         cursor.execute('''
-            INSERT OR REPLACE INTO dim_sistemas (nome, etapa_processo, area_responsavel)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO dim_sistemas (nome, id_etapa_cadeia, area_responsavel, fonte)
+            VALUES (?, ?, ?, 'relatorio_ti')
         ''', sistema)
 
-    # Inserir processos
+    # Inserir processos (normaliza unidade_negocio)
     for processo in processos_data:
+        nome, area, unidade = processo
+        unidade_normalizada = normalize_unidade(unidade)
         cursor.execute('''
             INSERT OR REPLACE INTO dim_processos (nome, area_responsavel, unidade_negocio)
             VALUES (?, ?, ?)
-        ''', processo)
+        ''', (nome, area, unidade_normalizada))
 
     conn.commit()
 
@@ -191,5 +218,10 @@ def map_sistemas_ti_to_db():
     print(f'[MAPEAMENTO] Mapeamento concluído com sucesso!')
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point para Poetry scripts."""
     map_sistemas_ti_to_db()
+
+
+if __name__ == "__main__":
+    main()

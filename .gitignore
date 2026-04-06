@@ -1,17 +1,40 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
 # Virtual environments
 venv/
-env/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Poetry
+.poetry/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
 .env
+.env.local
 
-# Banco de dados local (pode ser gerado localmente)
-data/output/motiva.db
-*.sqlite3
+# Database
+*.db
+*.db-journal
+*.db.backup*
 
-# Arquivos temporários
+# Output files
+data/output/*
+!data/output/.gitkeep
+
+# OS
 .DS_Store
 Thumbs.db
+
+# Temporary files
+tmp/
+*.tmp
+*.log
+*.lock

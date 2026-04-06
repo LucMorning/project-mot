@@ -58,13 +58,13 @@ class EntrevistadosRepository(BaseRepository):
         """Insere um novo ator e retorna o ID."""
         query = """
             INSERT INTO stg_entrevistados (
-                nome, cargo, diretoria, plataforma, area, nivel,
+                nome, cargo, diretoria, unidade_negocio, area, nivel,
                 dt_entrevista, tipo_entrevista, arquivo_transcricao,
                 arquivo_cargo_pdf, status_revisao
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         fields = [
-            'nome', 'cargo', 'diretoria', 'plataforma', 'area', 'nivel',
+            'nome', 'cargo', 'diretoria', 'unidade_negocio', 'area', 'nivel',
             'dt_entrevista', 'tipo_entrevista', 'arquivo_transcricao',
             'arquivo_cargo_pdf', 'status_revisao',
         ]
@@ -73,17 +73,18 @@ class EntrevistadosRepository(BaseRepository):
     def get_pending(self, limit: int = 100) -> List[Dict]:
         """Retorna lista de stg_entrevistados com análise pendente."""
         query = """
-            SELECT e.id, e.nome, e.cargo, e.plataforma, e.dt_entrevista, t.texto_limpo, e.arquivo_cargo_pdf
+            SELECT e.id, e.nome, e.cargo, e.unidade_negocio, e.dt_entrevista, t.texto_limpo, e.arquivo_cargo_pdf
             FROM stg_entrevistados e
-            JOIN stg_transcricoes t ON e.id = t.id_entrevistado
+            JOIN stg_arquivos_transcricao a ON a.id_entrevistado = e.id
+            JOIN stg_transcricoes t ON t.id_arquivo_transcricao = a.id
             WHERE e.status_revisao = ?
             LIMIT ?
         """
         rows = self._execute(query, (IntervieweeStatus.PENDING, limit,), fetch=True)
         return [
             {
-                'id': r[0], 'nome': r[1], 'cargo': r[2], 
-                'plataforma': r[3], 'dt_entrevista': r[4], 
+                'id': r[0], 'nome': r[1], 'cargo': r[2],
+                'unidade_negocio': r[3], 'dt_entrevista': r[4],
                 'texto': r[5], 'arquivo_cargo_pdf': r[6]
             } for r in rows
         ]
@@ -180,21 +181,25 @@ class InsightsRepository(BaseRepository):
         """
         query = """
             INSERT INTO fato_insights (
-                id_entrevistado, id_bloco, etapa_cadeia, categoria, subcategoria,
-                descricao, citacao_direta, sistemas_envolvidos, severidade,
+                id_entrevistado, id_bloco, id_etapa_cadeia, categoria, subcategoria,
+                descricao, citacao_direta, severidade, linhagem_dados,
+                risco_estimado, area_impactada, sistemas_envolvidos,
                 confianca, modelo_ia
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             dados.get('id_entrevistado'),
             dados.get('id_bloco'),
-            dados.get('etapa_cadeia'),
+            dados.get('id_etapa_cadeia'),
             dados.get('categoria'),
             dados.get('subcategoria'),
             dados.get('descricao'),
             dados.get('citacao_direta'),
-            json.dumps(dados.get('sistemas_envolvidos', []), ensure_ascii=False),
             dados.get('severidade'),
+            dados.get('linhagem_dados'),
+            dados.get('risco_estimado'),
+            dados.get('area_impactada'),
+            json.dumps(dados.get('sistemas_envolvidos', []), ensure_ascii=False),
             dados.get('confianca', 0.9),
             dados.get('modelo_ia')
         )
@@ -243,14 +248,30 @@ class SistemasUsoRepository(BaseRepository):
 
     def insert(self, dados: Dict) -> int:
         """Insere registro de uso de sistema."""
+        # Se veio "sistema" como string (nome), resolve para ID
+        id_sistema = dados.get('id_sistema')
+        if not id_sistema:
+            dim_repo = DimSistemasRepository(self.db_path)
+            id_sistema = dim_repo.get_or_create(dados.get('sistema'))
+            
         query = """
             INSERT INTO fato_sistemas_uso (
-                id_entrevistado, id_bloco, sistema, como_usa, etapa_cadeia,
-                satisfacao, workaround
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                id_entrevistado, id_bloco, id_sistema, como_usa,
+                satisfacao, workaround, entradas, saidas, is_excel_bridge
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        fields = ['id_entrevistado', 'id_bloco', 'sistema', 'como_usa', 'etapa_cadeia', 'satisfacao', 'workaround']
-        return self._execute(query, self._extract_params(dados, fields))
+        params = (
+            dados.get('id_entrevistado'),
+            dados.get('id_bloco'),
+            id_sistema,
+            dados.get('como_usa'),
+            dados.get('satisfacao'),
+            dados.get('workaround'),
+            dados.get('entradas'),
+            dados.get('saidas'),
+            dados.get('is_excel_bridge', 0)
+        )
+        return self._execute(query, params)
 
     def upsert(self, dados: Dict) -> int:
         """
@@ -258,43 +279,52 @@ class SistemasUsoRepository(BaseRepository):
 
         Se já existe, adiciona o novo contexto ao existente.
         """
-        sistema = dados.get('sistema')
+        sistema_nome = dados.get('sistema') # Nome vindo da IA
         entrevistado_id = dados.get('id_entrevistado')
         novo_contexto = dados.get('como_usa', '')
-        nova_etapa = dados.get('etapa_cadeia', '')
 
-        # Verifica se já existe
+        # Resolve ID do sistema
+        dim_repo = DimSistemasRepository(self.db_path)
+        id_sistema = dim_repo.get_or_create(sistema_nome)
+
+        # Verifica se já existe o uso deste sistema por este entrevistado
         check_query = """
-            SELECT id, como_usa, etapa_cadeia, workaround
+            SELECT id, como_usa, workaround
             FROM fato_sistemas_uso
-            WHERE id_entrevistado = ? AND LOWER(sistema) = LOWER(?)
+            WHERE id_entrevistado = ? AND id_sistema = ?
         """
-        rows = self._execute(check_query, (entrevistado_id, sistema), fetch=True)
+        rows = self._execute(check_query, (entrevistado_id, id_sistema), fetch=True)
 
         if rows:
             # Já existe - atualiza consolidando informações
-            existing_id, como_usa, etapa_cadeia, workaround = rows[0]
-
-            # Consolida etapas (sem duplicar)
-            etapas = set(etapa_cadeia.split(', ')) if etapa_cadeia else set()
-            etapas.update(nova_etapa.split(', ')) if nova_etapa else None
-            etapas.discard('')
-            etapa_consolidada = ', '.join(sorted(etapas))
+            existing_id, como_usa, workaround = rows[0]
 
             # Consolida workaround se não tiver
             workaround_consolidado = workaround or dados.get('workaround', '')
 
+            # Consolida linhagem
+            entradas_consolidado = dados.get('entradas', '')
+            saidas_consolidado = dados.get('saidas', '')
+
             update_query = """
                 UPDATE fato_sistemas_uso
                 SET como_usa = ?,
-                    etapa_cadeia = ?,
-                    workaround = ?
+                    workaround = ?,
+                    entradas = ?,
+                    saidas = ?,
+                    is_excel_bridge = ?
                 WHERE id = ?
             """
-            self._execute(update_query, (novo_contexto, etapa_consolidada, workaround_consolidado, existing_id))
+            self._execute(update_query, (
+                novo_contexto, workaround_consolidado,
+                entradas_consolidado, saidas_consolidado,
+                dados.get('is_excel_bridge', 0),
+                existing_id
+            ))
             return existing_id
         else:
-            # Não existe - insere novo
+            # Não existe - insere novo (forçando ID resolvido)
+            dados['id_sistema'] = id_sistema
             return self.insert(dados)
 
 # ─────────────────────────────────────────────────────────────
@@ -391,3 +421,92 @@ class ChunksRepository(BaseRepository):
             "UPDATE stg_chunks SET status_analise = 'concluido' WHERE id = ?",
             (chunk_id,)
         )
+
+
+# ─────────────────────────────────────────────────────────────
+# ARQUIVOS REPOSITORY
+# ─────────────────────────────────────────────────────────────
+
+class ArquivosRepository(BaseRepository):
+    """Repository para tabela stg_arquivos."""
+
+    def insert(self, dados: Dict) -> int:
+        """Insere um novo arquivo."""
+        query = """
+            INSERT INTO stg_arquivos (id_entrevistado, nome_arquivo, tipo_entrevista)
+            VALUES (?, ?, ?)
+        """
+        params = (
+            dados.get('id_entrevistado'),
+            dados.get('nome_arquivo'),
+            dados.get('tipo_entrevista')
+        )
+        return self._execute(query, params)
+
+    def find_by_entrevistado_and_tipo(self, id_entrevistado: int, tipo: str) -> Optional[int]:
+        """Busca arquivo por entrevistado e tipo. Retorna ID ou None."""
+        query = """
+            SELECT id FROM stg_arquivos
+            WHERE id_entrevistado = ? AND tipo_entrevista = ?
+        """
+        rows = self._execute(query, (id_entrevistado, tipo), fetch=True)
+        return rows[0][0] if rows else None
+
+    def get_all_with_transcricao(self) -> List[Dict]:
+        """Retorna todos os arquivos com suas transcrições."""
+        query = """
+            SELECT a.id, a.id_entrevistado, a.nome_arquivo, a.tipo_entrevista, t.texto_limpo
+            FROM stg_arquivos a
+            JOIN stg_transcricoes t ON a.id = t.id_arquivo
+        """
+        rows = self._execute(query, fetch=True)
+        return [
+            {
+                'id': r[0], 'id_entrevistado': r[1], 'nome_arquivo': r[2],
+                'tipo_entrevista': r[3], 'texto': r[4]
+            }
+            for r in rows
+        ]
+
+# ─────────────────────────────────────────────────────────────
+# SISTEMAS REPOSITORY (Dimensões)
+# ─────────────────────────────────────────────────────────────
+
+class DimSistemasRepository(BaseRepository):
+    """Repository para a tabela dim_sistemas."""
+
+    def get_or_create(self, nome: str) -> int:
+        """Busca ID do sistema pelo nome ou cria se não existir."""
+        if not nome:
+            return None
+            
+        nome = nome.strip()
+        # Busca exata (case insensitive)
+        row = self._execute("SELECT id FROM dim_sistemas WHERE LOWER(nome) = LOWER(?)", (nome,), fetch=True)
+        if row:
+            return row[0][0]
+        
+        # Cria novo se não existir — marcado como descoberto pela IA
+        print(f"      [SISTEMAS] Novo sistema detectado pela IA: {nome}")
+        return self._execute(
+            "INSERT INTO dim_sistemas (nome, fonte) VALUES (?, 'ia_analise')",
+            (nome,)
+        )
+
+    def get_by_entrevistado(self, entrevistado_id: int) -> List[Dict]:
+        """Retorna lista de sistemas vinculados a um entrevistado com detalhes do catálogo."""
+        query = """
+            SELECT s.nome, su.como_usa, su.satisfacao, su.workaround, su.entradas, su.saidas, c.nome as etapa_cadeia
+            FROM fato_sistemas_uso su
+            JOIN dim_sistemas s ON su.id_sistema = s.id
+            LEFT JOIN dim_cadeia_valor c ON s.id_etapa_cadeia = c.id
+            WHERE su.id_entrevistado = ?
+        """
+        rows = self._execute(query, (entrevistado_id,), fetch=True)
+        return [
+            {
+                'sistema': r[0], 'como_usa': r[1], 'satisfacao': r[2],
+                'workaround': r[3], 'entradas': r[4], 'saidas': r[5],
+                'etapa_cadeia': r[6]
+            } for r in rows
+        ]

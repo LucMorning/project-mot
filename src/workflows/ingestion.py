@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.workflows.ingest.ingest_metadata import ingest_master_spreadsheet
 from src.workflows.ingest.extract_roles import ingest_cargos
 from src.workflows.ingest.extract_transcripts import ingest_transcripts
+from src.workflows.ingest.create_chunks import create_chunks
 from src.workflows.ingest.ingest_systems import map_sistemas_ti_to_db
 from src.workflows.ingest.link_roles import link_roles_to_interviewees
 
@@ -39,23 +40,27 @@ def run_ingestion(skip_existing: bool = False):
     print("="*60 + "\n")
 
     # 1. Entrevistados (base - tudo depende disso)
-    print("[1/5] Ingestao de metadados (Excel -> Entrevistados)...")
+    print("[1/6] Ingestao de metadados (Excel -> stg_entrevistados)...")
     ingest_master_spreadsheet()
 
     # 2. Cargos (PDFs)
-    print("\n[2/5] Extracao de PDFs (Cargos -> Banco)...")
+    print("\n[2/6] Extracao de PDFs (Cargos -> stg_cargos)...")
     ingest_cargos()
 
     # 3. Transcrições (DOCX)
-    print("\n[3/5] Extracao de DOCX (Transcricoes -> Banco)...")
+    print("\n[3/6] Extracao de DOCX (Transcricoes -> stg_transcricoes)...")
     ingest_transcripts()
 
-    # 4. Sistemas TI (catálogo)
-    print("\n[4/5] Ingestao de catalogo de Sistemas TI...")
+    # 4. Chunks (divide transcrições em stg_chunks para análise IA)
+    print("\n[4/6] Criacao de chunks (stg_transcricoes -> stg_chunks)...")
+    create_chunks()
+
+    # 5. Sistemas TI (catálogo)
+    print("\n[5/6] Ingestao de catalogo de Sistemas TI (dim_sistemas)...")
     map_sistemas_ti_to_db()
 
-    # 5. Links (cargo <-> pessoa)
-    print("\n[5/5] Linkagem de Entrevistados <-> Cargos...")
+    # 6. Links (cargo <-> pessoa)
+    print("\n[6/6] Linkagem de stg_entrevistados <-> stg_cargos...")
     link_roles_to_interviewees()
 
     print("\n" + "="*60)
@@ -63,7 +68,8 @@ def run_ingestion(skip_existing: bool = False):
     print("="*60 + "\n")
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point para Poetry scripts."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Workflow de ingestão de dados MOTIVA")
@@ -72,3 +78,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     run_ingestion(skip_existing=args.skip_existing)
+
+
+if __name__ == "__main__":
+    main()

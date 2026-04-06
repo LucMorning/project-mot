@@ -17,6 +17,9 @@ class PainPoint(BaseModel):
     subcategoria: str = Field(description="Tipo específico: 'ETL Humano', 'Silo', 'Gargalo', 'Erro Manual', 'Falta Integração', etc")
     descricao: str = Field(description="Descrição detalhada do problema")
     citacao_direta: str = Field(description="Trecho EXATO em aspas que comprova a dor")
+    linhagem_dado: str = Field(description="De onde o dado vem e para onde vai (ex: 'Sai do SAP PS pro Excel')")
+    risco_ao_negocio: str = Field(description="Qual o risco real: 'Financeiro', 'Compliance', 'Atraso', 'Dados Errados'")
+    area_impactada: str = Field(description="Qual área interna da Motiva sofre com isso")
     sistemas_envolvidos: list[str] = Field(description="Sistemas mencionados neste contexto")
     impacto: str = Field(description="'Alto', 'Médio', 'Baixo' - impacto no negócio/CAPEX")
 
@@ -41,6 +44,12 @@ Your EXCLUSIVE FOCUS: Identify pain points, bottlenecks and problems in the CAPE
 2. **INFORMATION SILOS**: Systems that don't communicate, isolated data
 3. **BOTTLENECKS**: Waiting points, delays, bureaucracy, slow approvals
 4. **MANUAL ERROR**: Sensitive processes dependent on human validation (formula error risk, etc)
+
+DATA LINEAGE & RISK FOCUS:
+For each pain point, you MUST identify:
+- **DATA LINEAGE**: Where the data starts and where it ends (e.g. from SAP PS to Excel).
+- **BUSINESS RISK**: Identify if it's a financial risk, compliance, delay or wrong data.
+- **IMPACTED AREA**: Mention the area (e.g. Engineering, Procurement, Finance).
 
 Signs of Manual ETL to HUNT:
 - "Excel", "spreadsheet", "copy", "paste", "consolidate", "merge"
